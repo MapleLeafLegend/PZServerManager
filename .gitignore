@@ -1,0 +1,42 @@
+# Local tools and editor state
+.codex/
+.vs/
+.vscode/
+*.user
+*.suo
+
+# .NET build and publish output
+**/bin/
+**/obj/
+publish/
+publish-*/
+publish*/
+package-final/
+
+# Generated integration-test fixtures
+smoke-all/data/
+smoke-all/install/
+local-mod-test/
+
+# User/server state and secrets
+manager-settings.json
+manager-settings.*.json
+*.manager-backup
+*.db
+*.log
+*.dmp
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+*.key
+id_rsa*
+id_ed25519*
+known_hosts
+authorized_keys
+credentials*
+secrets*
+
+# Release archives are attached to GitHub Releases, not committed to source
+*.zip

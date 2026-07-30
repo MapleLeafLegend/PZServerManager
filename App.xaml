@@ -1,0 +1,83 @@
+<Application x:Class="PZServerManager.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="Panel" Color="#182026"/>
+    <SolidColorBrush x:Key="Card" Color="#222D34"/>
+    <SolidColorBrush x:Key="Accent" Color="#E1A84B"/>
+    <FontFamily x:Key="AppUiFontFamily">./Assets/Fonts/#Noto Sans TC</FontFamily>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="14,8"/><Setter Property="Margin" Value="4"/>
+      <Setter Property="Background" Value="#354650"/><Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+       <Border x:Name="ButtonChrome" Background="{TemplateBinding Background}" CornerRadius="5"
+        Padding="{TemplateBinding Padding}" BorderBrush="#526974" BorderThickness="1">
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+       </Border>
+       <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#E1A84B"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonChrome" Property="Opacity" Value="0.72"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="ButtonChrome" Property="Opacity" Value="0.4"/></Trigger>
+       </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Padding" Value="8,6"/><Setter Property="Margin" Value="4"/>
+      <Setter Property="Background" Value="#11171B"/><Setter Property="Foreground" Value="#EAF0F2"/>
+      <Setter Property="BorderBrush" Value="#42545E"/><Setter Property="CaretBrush" Value="White"/>
+    </Style>
+    <Style TargetType="PasswordBox">
+      <Setter Property="Padding" Value="8,6"/><Setter Property="Margin" Value="4"/>
+      <Setter Property="Background" Value="#11171B"/><Setter Property="Foreground" Value="#EAF0F2"/>
+      <Setter Property="BorderBrush" Value="#42545E"/>
+    </Style>
+    <Style TargetType="CheckBox"><Setter Property="Margin" Value="5"/><Setter Property="Foreground" Value="#DDE7EB"/></Style>
+    <Style TargetType="Label"><Setter Property="Foreground" Value="#AFC0C8"/><Setter Property="Padding" Value="4,7"/></Style>
+    <Style TargetType="GroupBox">
+      <Setter Property="Foreground" Value="#E1A84B"/><Setter Property="Margin" Value="5"/>
+      <Setter Property="Padding" Value="8"/><Setter Property="BorderBrush" Value="#354650"/>
+    </Style>
+    <Style TargetType="TabControl">
+      <Setter Property="Background" Value="#182026"/><Setter Property="BorderBrush" Value="#354650"/>
+    </Style>
+    <Style TargetType="TabItem">
+      <Setter Property="Foreground" Value="#BFCED4"/><Setter Property="Background" Value="#182026"/>
+      <Setter Property="FontSize" Value="16"/><Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Padding" Value="22,12"/><Setter Property="Margin" Value="2,0"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
+       <Border x:Name="TabChrome" Background="{TemplateBinding Background}" CornerRadius="6,6,0,0"
+        Padding="{TemplateBinding Padding}" BorderBrush="#354650" BorderThickness="1,1,1,0">
+        <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+       </Border>
+       <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabChrome" Property="Background" Value="#263841"/><Setter Property="Foreground" Value="White"/></Trigger>
+        <Trigger Property="IsSelected" Value="True"><Setter TargetName="TabChrome" Property="Background" Value="#8A641F"/><Setter TargetName="TabChrome" Property="BorderBrush" Value="#E1A84B"/><Setter Property="Foreground" Value="White"/></Trigger>
+       </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="DataGridColumnHeader">
+      <Setter Property="MinHeight" Value="32"/>
+      <Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Background" Value="#24313A"/>
+      <Setter Property="Foreground" Value="#EAF0F2"/>
+      <Setter Property="BorderBrush" Value="#3C515B"/>
+      <Setter Property="BorderThickness" Value="0,0,1,1"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#30434D"/>
+          <Setter Property="Foreground" Value="White"/>
+          <Setter Property="BorderBrush" Value="#E1A84B"/>
+        </Trigger>
+        <Trigger Property="IsPressed" Value="True">
+          <Setter Property="Background" Value="#8A641F"/>
+          <Setter Property="Foreground" Value="White"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+  </Application.Resources>
+</Application>

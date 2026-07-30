@@ -1,0 +1,17 @@
+PZ 伺服器管理器 v1.9.0
+========================
+
+第一次使用只需要：
+
+1. 將 ZIP 完整解壓縮。
+2. 執行 PZServerManager.exe。
+3. 依畫面導引準備 SteamCMD 並安裝 PZ Dedicated Server。
+
+不需要另外安裝 .NET 8、Visual Studio 或其他開發工具。
+支援 Windows Server 2022 Desktop Experience x64；不支援 Server Core。
+請勿直接在 ZIP 壓縮檔內執行 EXE。
+請保留 EXE 旁的 Languages 資料夾，語言下拉選單與自訂翻譯會從該處讀取。
+
+程式不會在您明確按下設定儲存按鈕以前修改 PZ 的 INI 或 SandboxVars.lua。
+僅限非商業用途；授權與免責聲明請閱讀 LICENSE、DISCLAIMER.md。
+完整功能、安全注意事項及疑難排解請閱讀 README.md。

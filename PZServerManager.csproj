@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PZServerManager</AssemblyName>
+    <RootNamespace>PZServerManager</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Version>1.9.0</Version>
+    <AssemblyVersion>1.9.0.0</AssemblyVersion>
+    <FileVersion>1.9.0.0</FileVersion>
+    <InformationalVersion>1.9.0</InformationalVersion>
+    <ApplicationIcon>Assets\pz-server-manager.ico</ApplicationIcon>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="smoke-all\test-harness\**\*.cs" />
+    <Resource Include="Assets\pz-server-manager.ico" />
+    <Resource Include="Assets\pz-server-manager-icon.png" />
+    <Resource Include="Assets\pz-server-manager-logo.png" />
+    <Resource Include="Assets\Fonts\*.otf" />
+    <Resource Include="Assets\Fonts\*.ttf" />
+    <None Update="Languages\**\*" CopyToOutputDirectory="Always"
+      CopyToPublishDirectory="Always" />
+  </ItemGroup>
+</Project>
