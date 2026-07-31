@@ -28,6 +28,12 @@ internal static class Program
             Assert(freshDefaults.Description == "", "Manager must not invent a server description.");
             Assert(freshDefaults.Password == "", "Manager must not invent a join password.");
             Assert(freshDefaults.WelcomeMessage == "", "Manager must not invent a welcome message.");
+            Assert(freshDefaults.AutoWorkshopUpdate &&
+                freshDefaults.WorkshopUpdateCheckMinutes == 5,
+                "Workshop update checks must default to enabled every five minutes.");
+            Assert(freshDefaults.WorkshopUpdateBroadcast &&
+                freshDefaults.WorkshopUpdateAnnouncementMinutes == 30,
+                "Workshop update broadcasts must default to enabled every thirty minutes.");
             window = new MainWindow();
             windowType = typeof(MainWindow);
             Invoke("BeginSetupActivity", "安裝狀態測試", "正在準備測試…");
@@ -43,6 +49,22 @@ internal static class Program
                 "Setup completion state was not displayed.");
             ((System.Windows.FrameworkElement)Control("SetupActivityPanel")).Visibility =
                 System.Windows.Visibility.Collapsed;
+            Checked("AutoWorkshopUpdateCheck", false);
+            Assert(!((TextBox)Control("WorkshopUpdateCheckMinutesBox")).IsEnabled,
+                "The update interval must be disabled when update checks are disabled.");
+            Assert(!((CheckBox)Control("WorkshopUpdateBroadcastCheck")).IsEnabled,
+                "The broadcast option must be a disabled child of update checks.");
+            Checked("AutoWorkshopUpdateCheck", true);
+            Checked("WorkshopUpdateBroadcastCheck", false);
+            Assert(((TextBox)Control("WorkshopUpdateCheckMinutesBox")).IsEnabled,
+                "The update interval must be enabled with update checks.");
+            Assert(!((TextBox)Control("WorkshopUpdateAnnouncementMinutesBox")).IsEnabled &&
+                !((TextBox)Control("WorkshopUpdateMessageBox")).IsEnabled,
+                "Broadcast fields must be disabled when broadcasts are disabled.");
+            Checked("WorkshopUpdateBroadcastCheck", true);
+            Assert(((TextBox)Control("WorkshopUpdateAnnouncementMinutesBox")).IsEnabled &&
+                ((TextBox)Control("WorkshopUpdateMessageBox")).IsEnabled,
+                "Broadcast fields must be enabled when both parent and child options are enabled.");
             var smokeRoot = Path.Combine(Directory.GetCurrentDirectory(), "smoke-all");
             Console.WriteLine($"SMOKE_ROOT={smokeRoot}");
             Text("InstallPathBox", Path.Combine(smokeRoot, "install"));
@@ -63,6 +85,11 @@ internal static class Program
             Checked("PublicCheck", true);
             Checked("OpenCheck", false);
             Checked("PauseCheck", false);
+            Checked("AutoWorkshopUpdateCheck", true);
+            Text("WorkshopUpdateCheckMinutesBox", "7");
+            Checked("WorkshopUpdateBroadcastCheck", true);
+            Text("WorkshopUpdateAnnouncementMinutesBox", "45");
+            Text("WorkshopUpdateMessageBox", "模組已更新；全員離線後將安全重啟。");
 
             Checked("PvpCheck", false);
             Checked("SafetyCheck", false);
@@ -117,6 +144,17 @@ internal static class Program
             Text("LoginQueueTimeoutBox", "75");
 
             Assert((bool)Invoke("UiToSettings", false)!, "Valid UI values were rejected.");
+            var automationSettings = Field("settings").GetValue(window)!;
+            Assert((bool)automationSettings.GetType().GetProperty("AutoWorkshopUpdate")!
+                    .GetValue(automationSettings)! &&
+                (int)automationSettings.GetType().GetProperty("WorkshopUpdateCheckMinutes")!
+                    .GetValue(automationSettings)! == 7,
+                "Independent Workshop check settings were not read from the GUI.");
+            Assert((bool)automationSettings.GetType().GetProperty("WorkshopUpdateBroadcast")!
+                    .GetValue(automationSettings)! &&
+                (int)automationSettings.GetType().GetProperty("WorkshopUpdateAnnouncementMinutes")!
+                    .GetValue(automationSettings)! == 45,
+                "Independent Workshop broadcast settings were not read from the GUI.");
             Field("explicitConfigWriteAuthorized").SetValue(window, true);
             try { Invoke("WriteServerConfig"); }
             finally { Field("explicitConfigWriteAuthorized").SetValue(window, false); }
@@ -254,6 +292,18 @@ internal static class Program
             window.Show();
             ((System.Windows.FrameworkElement)Control("MainTabs")).Visibility =
                 System.Windows.Visibility.Visible;
+            SelectContainingTabs((System.Windows.DependencyObject)Control("AutoWorkshopUpdateCheck"));
+            window.UpdateLayout();
+            var workshopAutomationControl =
+                (System.Windows.FrameworkElement)Control("AutoWorkshopUpdateCheck");
+            var workshopAutomationPosition =
+                workshopAutomationControl.TransformToAncestor(window)
+                    .Transform(new System.Windows.Point(0, 0));
+            Assert(workshopAutomationControl.ActualWidth > 0 &&
+                workshopAutomationPosition.Y >= 0 &&
+                workshopAutomationPosition.Y + workshopAutomationControl.ActualHeight <=
+                    window.ActualHeight,
+                "Workshop automation controls are outside the default visible window.");
             Field("uiInitialized").SetValue(window, false);
             try
             {
@@ -335,6 +385,26 @@ internal static class Program
                 .Select(value => value.ToString()).ToList();
             Assert(parsedDependencies.SequenceEqual(new[] { "2950902979" }),
                 "Steam required-item HTML was not parsed correctly.");
+            const string workshopManifest =
+                "\"WorkshopItemsInstalled\"\n{\n" +
+                "  \"100\"\n  {\n    \"manifest\" \"500\"\n    \"timeupdated\" \"1700000000\"\n  }\n" +
+                "  \"200\"\n  {\n    \"manifest\" \"600\"\n    \"timeupdated\" \"1800000000\"\n  }\n}";
+            var installedTimes = (System.Collections.IDictionary)Invoke(
+                "ParseInstalledWorkshopUpdateTimes", workshopManifest,
+                new[] { "100", "200", "300" })!;
+            Assert((long)installedTimes["100"]! == 1700000000L &&
+                (long)installedTimes["200"]! == 1800000000L &&
+                !installedTimes.Contains("300"),
+                "Local appworkshop timestamp parsing is incorrect.");
+            const string publishedDetails =
+                "{\"response\":{\"publishedfiledetails\":[" +
+                "{\"publishedfileid\":\"100\",\"result\":1,\"time_updated\":1700000100}," +
+                "{\"publishedfileid\":\"200\",\"result\":9,\"time_updated\":1800000100}]}}";
+            var remoteTimes = (System.Collections.IDictionary)Invoke(
+                "ParsePublishedWorkshopUpdateTimes", publishedDetails)!;
+            Assert((long)remoteTimes["100"]! == 1700000100L &&
+                !remoteTimes.Contains("200"),
+                "Steam published-file timestamp parsing is incorrect.");
             var requirements = (System.Collections.IDictionary)
                 Field("workshopRequirements").GetValue(window)!;
             requirements["100"] = new List<string> { "900" };
@@ -368,7 +438,8 @@ internal static class Program
                 ?? throw new MissingFieldException("CreatorText")).GetValue(about)!;
             var disclaimer = (TextBlock)(aboutType.GetField("DisclaimerText", Flags)
                 ?? throw new MissingFieldException("DisclaimerText")).GetValue(about)!;
-            Assert(aboutVersion.Text == "版本 v1.9.0", "About version is incorrect.");
+            Assert(aboutVersion.Text == "版本 v1.9.2",
+                $"About version is incorrect: {aboutVersion.Text}");
             Assert(creator.Text == "MapleLeaf", "About creator is incorrect.");
             var disclaimerText = new System.Windows.Documents.TextRange(
                 disclaimer.ContentStart, disclaimer.ContentEnd).Text;

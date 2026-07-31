@@ -39,6 +39,12 @@ public partial class MainWindow : Window
     private Process? serverProcess;
     private DateTime? nextRestart;
     private DateTime? nextPlayerQuery;
+    private DateTime? nextWorkshopUpdateCheck;
+    private DateTime? nextWorkshopUpdateAnnouncement;
+    private readonly HashSet<string> pendingWorkshopUpdateIds = new(StringComparer.OrdinalIgnoreCase);
+    private int workshopUpdateCheckRunning;
+    private int? lastKnownOnlinePlayerCount;
+    private bool workshopRestartInProgress;
     private readonly object playerQueryLock = new();
     private readonly List<string> playerQueryOutput = new();
     private volatile bool capturePlayerQueryOutput;
@@ -622,6 +628,14 @@ public partial class MainWindow : Window
         WarningMinutesBox.Text = settings.WarningMinutes.ToString(); BackupCheck.IsChecked = settings.BackupBeforeRestart;
         PlayerQueryMinutesBox.Text = settings.PlayerQueryMinutes.ToString();
         RestartMessageBox.Text = settings.RestartWarningMessage;
+        AutoWorkshopUpdateCheck.IsChecked = settings.AutoWorkshopUpdate;
+        WorkshopUpdateCheckMinutesBox.Text =
+            settings.WorkshopUpdateCheckMinutes.ToString(CultureInfo.InvariantCulture);
+        WorkshopUpdateBroadcastCheck.IsChecked = settings.WorkshopUpdateBroadcast;
+        WorkshopUpdateAnnouncementMinutesBox.Text =
+            settings.WorkshopUpdateAnnouncementMinutes.ToString(CultureInfo.InvariantCulture);
+        WorkshopUpdateMessageBox.Text = settings.WorkshopUpdateWarningMessage;
+        UpdateWorkshopAutomationControlState();
         SelectByTag(ConfigEncodingCombo, settings.ConfigEncoding);
         SelectByTag(SettingsStorageCombo, settings.SettingsStorage);
         SelectByTag(UiFontCombo, settings.UiFontFamily);
@@ -690,6 +704,21 @@ public partial class MainWindow : Window
     {
         if (resolvedModEntries.Count > 0 && !ApplyResolvedMods(showError)) return false;
         if (spawnRegionSelectionTouched && !ValidateMapSelections(showError)) return false;
+        var autoWorkshopUpdate = AutoWorkshopUpdateCheck.IsChecked == true;
+        var workshopUpdateBroadcast = WorkshopUpdateBroadcastCheck.IsChecked == true;
+        var workshopCheckMinutesValid =
+            int.TryParse(WorkshopUpdateCheckMinutesBox.Text, out var workshopCheckMinutes) &&
+            workshopCheckMinutes is >= 1 and <= 1440;
+        var workshopAnnouncementMinutesValid =
+            int.TryParse(WorkshopUpdateAnnouncementMinutesBox.Text, out var workshopAnnouncementMinutes) &&
+            workshopAnnouncementMinutes is >= 1 and <= 1440;
+        if (!workshopCheckMinutesValid && !autoWorkshopUpdate)
+            workshopCheckMinutes = settings.WorkshopUpdateCheckMinutes is >= 1 and <= 1440
+                ? settings.WorkshopUpdateCheckMinutes : 5;
+        if (!workshopAnnouncementMinutesValid &&
+            (!autoWorkshopUpdate || !workshopUpdateBroadcast))
+            workshopAnnouncementMinutes = settings.WorkshopUpdateAnnouncementMinutes is >= 1 and <= 1440
+                ? settings.WorkshopUpdateAnnouncementMinutes : 30;
         if (!int.TryParse(PortBox.Text, out var port) || port is < 0 or > 65535 ||
             !int.TryParse(UdpPortBox.Text, out var udp) || udp is < 0 or > 65535 ||
             !int.TryParse(PlayersBox.Text, out var players) || players is < 1 or > 100 ||
@@ -697,7 +726,9 @@ public partial class MainWindow : Window
             !int.TryParse(RestartHoursBox.Text, out var hours) || hours is < 1 or > 168 ||
             !int.TryParse(WarningMinutesBox.Text, out var warning) || warning is < 0 or > 60 ||
             !int.TryParse(PlayerQueryMinutesBox.Text, out var playerQueryMinutes) ||
-                playerQueryMinutes is < 1 or > 1440)
+                playerQueryMinutes is < 1 or > 1440 ||
+            (autoWorkshopUpdate && !workshopCheckMinutesValid) ||
+            (autoWorkshopUpdate && workshopUpdateBroadcast && !workshopAnnouncementMinutesValid))
         {
             if (showError) MessageBox.Show("請檢查連接埠、玩家數、記憶體與排程欄位。", "設定格式錯誤",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -729,10 +760,16 @@ public partial class MainWindow : Window
             MapFolders = NormalizeSemicolonList(MapFoldersBox.Text),
             RconPassword = RconPasswordBox.Password, AutoRestart = AutoRestartCheck.IsChecked == true,
             RestartHours = hours, WarningMinutes = warning, PlayerQueryMinutes = playerQueryMinutes,
-            BackupBeforeRestart = BackupCheck.IsChecked == true
+            BackupBeforeRestart = BackupCheck.IsChecked == true,
+            AutoWorkshopUpdate = autoWorkshopUpdate,
+            WorkshopUpdateCheckMinutes = workshopCheckMinutes,
+            WorkshopUpdateBroadcast = workshopUpdateBroadcast,
+            WorkshopUpdateAnnouncementMinutes = workshopAnnouncementMinutes
         };
         settings.RestartWarningMessage = string.IsNullOrWhiteSpace(RestartMessageBox.Text)
             ? new ServerSettings().RestartWarningMessage : RestartMessageBox.Text.Trim();
+        settings.WorkshopUpdateWarningMessage = string.IsNullOrWhiteSpace(WorkshopUpdateMessageBox.Text)
+            ? new ServerSettings().WorkshopUpdateWarningMessage : WorkshopUpdateMessageBox.Text.Trim();
         if (ContainsIrrecoverableTextLoss(settings.Description) ||
             ContainsIrrecoverableTextLoss(settings.WelcomeMessage))
         {
@@ -1329,17 +1366,32 @@ SandboxVars = {
             StartButton.IsEnabled = false; StopButton.IsEnabled = true;
             SaveWorldButton.IsEnabled = true;
             PlayerQueryMinutesBox.IsEnabled = false;
+            AutoWorkshopUpdateCheck.IsEnabled = false;
+            WorkshopUpdateCheckMinutesBox.IsEnabled = false;
+            WorkshopUpdateBroadcastCheck.IsEnabled = false;
+            WorkshopUpdateAnnouncementMinutesBox.IsEnabled = false;
+            WorkshopUpdateMessageBox.IsEnabled = false;
             SetStatus("執行中", "#4FC18B"); Log($"伺服器已啟動（PID {serverProcess.Id}）。");
             ScheduleNextRestart();
             nextPlayerQuery = DateTime.Now.AddMinutes(settings.PlayerQueryMinutes);
+            ScheduleWorkshopUpdateCheck();
+            UpdateWorkshopAutomationControlState();
             _ = QueryOnlinePlayersAsync();
         }
         catch (Exception ex)
         {
             Log($"啟動失敗：{ex.Message}");
             PlayerQueryMinutesBox.IsEnabled = true;
+            AutoWorkshopUpdateCheck.IsEnabled = true;
+            WorkshopUpdateCheckMinutesBox.IsEnabled = true;
+            WorkshopUpdateBroadcastCheck.IsEnabled = true;
+            WorkshopUpdateAnnouncementMinutesBox.IsEnabled = true;
+            WorkshopUpdateMessageBox.IsEnabled = true;
             serverProcess.Dispose();
             serverProcess = null;
+            nextWorkshopUpdateCheck = null;
+            UpdateWorkshopAutomationControlState();
+            UpdateWorkshopUpdateStatus();
         }
         return Task.CompletedTask;
     }
@@ -1380,11 +1432,19 @@ SandboxVars = {
             StartButton.IsEnabled = true; StopButton.IsEnabled = false;
             SaveWorldButton.IsEnabled = false;
             PlayerQueryMinutesBox.IsEnabled = true;
+            AutoWorkshopUpdateCheck.IsEnabled = true;
+            WorkshopUpdateCheckMinutesBox.IsEnabled = true;
+            WorkshopUpdateBroadcastCheck.IsEnabled = true;
+            WorkshopUpdateAnnouncementMinutesBox.IsEnabled = true;
+            WorkshopUpdateMessageBox.IsEnabled = true;
             SetStatus("已停止", "#71808A"); nextRestart = null; UpdateNextRestartText();
             nextPlayerQuery = null;
+            nextWorkshopUpdateCheck = null;
+            lastKnownOnlinePlayerCount = null;
             OnlinePlayersListBox.ItemsSource = null;
             OnlinePlayerSummaryText.Text = "伺服器未啟動";
             if (ReferenceEquals(serverProcess, exitedProcess)) serverProcess = null;
+            UpdateWorkshopAutomationControlState();
             try { exitedProcess?.Dispose(); } catch { }
             if (roleInitializationFailure)
             {
@@ -1403,11 +1463,17 @@ SandboxVars = {
             if (restartAfterStop)
             {
                 restartAfterStop = false;
+                workshopRestartInProgress = false;
                 Log("5 秒後重新啟動…");
                 await Task.Delay(5000);
                 await StartServerAsync();
             }
-            else if (!intentionalStop) Log("偵測到非預期停止；未自動啟動，請檢查主控台。");
+            else
+            {
+                workshopRestartInProgress = false;
+                if (!intentionalStop) Log("偵測到非預期停止；未自動啟動，請檢查主控台。");
+                UpdateWorkshopUpdateStatus();
+            }
             if (closeAfterServerStops)
             {
                 closeAfterServerStops = false;
@@ -1506,8 +1572,10 @@ SandboxVars = {
     private void SaveSchedule_Click(object sender, RoutedEventArgs e)
     {
         if (!UiToSettings()) return;
-        PersistSettings(); ScheduleNextRestart();
-        MessageBox.Show(settings.AutoRestart ? "排程已啟用。" : "排程已停用。");
+        PersistSettings();
+        ScheduleNextRestart();
+        ScheduleWorkshopUpdateCheck();
+        MessageBox.Show("自動化設定已儲存。");
     }
 
     private void SaveFullConfig_Click(object sender, RoutedEventArgs e)
@@ -3384,10 +3452,354 @@ SandboxVars = {
         UpdateNextRestartText();
     }
 
+    private void ScheduleWorkshopUpdateCheck()
+    {
+        if (serverProcess is not { HasExited: false })
+        {
+            nextWorkshopUpdateCheck = null;
+            UpdateWorkshopUpdateStatus();
+            return;
+        }
+        if (!settings.AutoWorkshopUpdate)
+        {
+            nextWorkshopUpdateCheck = null;
+            pendingWorkshopUpdateIds.Clear();
+            nextWorkshopUpdateAnnouncement = null;
+            UpdateWorkshopUpdateStatus();
+            return;
+        }
+        nextWorkshopUpdateCheck = DateTime.Now.AddMinutes(
+            settings.WorkshopUpdateCheckMinutes);
+        if (!settings.WorkshopUpdateBroadcast)
+            nextWorkshopUpdateAnnouncement = null;
+        UpdateWorkshopUpdateStatus();
+    }
+
+    private void WorkshopAutomationOptionChanged(object sender, RoutedEventArgs e) =>
+        UpdateWorkshopAutomationControlState();
+
+    private void UpdateWorkshopAutomationControlState()
+    {
+        if (AutoWorkshopUpdateCheck == null ||
+            WorkshopUpdateCheckMinutesBox == null ||
+            WorkshopUpdateBroadcastCheck == null ||
+            WorkshopUpdateAnnouncementMinutesBox == null ||
+            WorkshopUpdateMessageBox == null)
+            return;
+        var serverRunning = serverProcess is { HasExited: false };
+        var checkEnabled = AutoWorkshopUpdateCheck.IsChecked == true;
+        var broadcastEnabled = checkEnabled && WorkshopUpdateBroadcastCheck.IsChecked == true;
+        AutoWorkshopUpdateCheck.IsEnabled = !serverRunning;
+        WorkshopUpdateCheckMinutesBox.IsEnabled = !serverRunning && checkEnabled;
+        WorkshopUpdateBroadcastCheck.IsEnabled = !serverRunning && checkEnabled;
+        WorkshopUpdateAnnouncementMinutesBox.IsEnabled = !serverRunning && broadcastEnabled;
+        WorkshopUpdateMessageBox.IsEnabled = !serverRunning && broadcastEnabled;
+    }
+
+    private async Task CheckWorkshopUpdatesAsync()
+    {
+        if (serverProcess is not { HasExited: false } ||
+            !settings.AutoWorkshopUpdate ||
+            Interlocked.Exchange(ref workshopUpdateCheckRunning, 1) != 0)
+            return;
+        try
+        {
+            var ids = NormalizeWorkshopList(settings.WorkshopItems)
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(id => ulong.TryParse(id, out _))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (ids.Count == 0)
+            {
+                pendingWorkshopUpdateIds.Clear();
+                nextWorkshopUpdateAnnouncement = null;
+                LocalizationService.SetText(WorkshopUpdateStatusText,
+                    "模組更新：尚未設定 Workshop 項目");
+                return;
+            }
+
+            var installed = ReadInstalledWorkshopUpdateTimes(ids);
+            if (installed.Count == 0)
+            {
+                LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+                    "模組更新：找不到本機版本紀錄；下次檢查 {0}",
+                    nextWorkshopUpdateCheck?.ToString("HH:mm") ?? "—");
+                Log("找不到 appworkshop_108600.acf 的本機 timeupdated；為避免誤判，不會自動重啟。");
+                return;
+            }
+
+            var remote = await FetchPublishedWorkshopUpdateTimesAsync(ids);
+            var outdated = ids.Where(id =>
+                    installed.TryGetValue(id, out var localTime) &&
+                    remote.TryGetValue(id, out var remoteTime) &&
+                    remoteTime > localTime)
+                .ToList();
+            var previouslyPending = pendingWorkshopUpdateIds.Count > 0;
+            pendingWorkshopUpdateIds.Clear();
+            foreach (var id in outdated) pendingWorkshopUpdateIds.Add(id);
+
+            var missingLocal = ids.Count(id => !installed.ContainsKey(id));
+            if (missingLocal > 0)
+                Log($"{missingLocal} 個 Workshop 項目沒有本機 timeupdated，已略過以避免誤判。");
+
+            if (pendingWorkshopUpdateIds.Count == 0)
+            {
+                if (previouslyPending) Log("待更新模組已完成更新，本次不再需要重啟。");
+                nextWorkshopUpdateAnnouncement = null;
+                lastKnownOnlinePlayerCount = null;
+                LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+                    "模組更新：已是最新；下次檢查 {0}",
+                    nextWorkshopUpdateCheck?.ToString("HH:mm") ?? "—");
+                return;
+            }
+
+            if (!previouslyPending)
+            {
+                nextWorkshopUpdateAnnouncement =
+                    settings.WorkshopUpdateBroadcast ? DateTime.Now : null;
+                Log($"偵測到 {pendingWorkshopUpdateIds.Count} 個 Workshop 更新：{string.Join(", ", pendingWorkshopUpdateIds)}");
+            }
+            await EvaluatePendingWorkshopUpdatesAsync();
+        }
+        catch (Exception ex)
+        {
+            Log($"Workshop 更新檢查失敗：{ex.Message}");
+            LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+                "模組更新：檢查失敗，將於 {0} 重試",
+                nextWorkshopUpdateCheck?.ToString("HH:mm") ?? "—");
+            if (pendingWorkshopUpdateIds.Count > 0)
+                await EvaluatePendingWorkshopUpdatesAsync();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref workshopUpdateCheckRunning, 0);
+        }
+    }
+
+    private async Task EvaluatePendingWorkshopUpdatesAsync()
+    {
+        if (pendingWorkshopUpdateIds.Count == 0 ||
+            serverProcess is not { HasExited: false } ||
+            workshopRestartInProgress)
+            return;
+
+        var onlinePlayers = await QueryOnlinePlayersAsync();
+        if (onlinePlayers is null)
+        {
+            if (settings.WorkshopUpdateBroadcast)
+                nextWorkshopUpdateAnnouncement = DateTime.Now.AddMinutes(
+                    Math.Min(settings.WorkshopUpdateCheckMinutes,
+                        settings.WorkshopUpdateAnnouncementMinutes));
+            LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+                "模組更新：無法確認在線人數，將於 {0} 再檢查",
+                (nextWorkshopUpdateAnnouncement ?? nextWorkshopUpdateCheck)
+                    ?.ToString("HH:mm") ?? "—");
+            return;
+        }
+
+        if (onlinePlayers.Value == 0)
+        {
+            workshopRestartInProgress = true;
+            LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+                "模組更新：偵測到 {0} 個更新，正在安全重啟",
+                pendingWorkshopUpdateIds.Count);
+            Log("模組有更新且已確認目前無玩家；開始安全存檔、關服與重啟。");
+            await SafeStopAsync(true);
+            if (serverProcess is { HasExited: false } && !restartAfterStop)
+            {
+                workshopRestartInProgress = false;
+                nextWorkshopUpdateCheck = DateTime.Now.AddMinutes(
+                    settings.WorkshopUpdateCheckMinutes);
+            }
+            return;
+        }
+
+        if (settings.WorkshopUpdateBroadcast &&
+            (nextWorkshopUpdateAnnouncement is null ||
+             DateTime.Now >= nextWorkshopUpdateAnnouncement.Value))
+        {
+            SendCommand($"servermsg \"{FormatWorkshopUpdateMessage()}\"");
+            nextWorkshopUpdateAnnouncement = DateTime.Now.AddMinutes(
+                settings.WorkshopUpdateAnnouncementMinutes);
+            Log($"已公告模組更新；仍有 {onlinePlayers.Value} 位玩家，" +
+                $"{settings.WorkshopUpdateAnnouncementMinutes} 分鐘後才會再次公告。");
+        }
+        if (settings.WorkshopUpdateBroadcast)
+            LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+                "模組更新：等待 {0} 位玩家離線；下次公告 {1}",
+                onlinePlayers.Value,
+                nextWorkshopUpdateAnnouncement?.ToString("HH:mm") ?? "—");
+        else
+            LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+                "模組更新：等待 {0} 位玩家離線；公告已停用",
+                onlinePlayers.Value);
+    }
+
+    private Dictionary<string, long> ReadInstalledWorkshopUpdateTimes(IEnumerable<string> ids)
+    {
+        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var steamCmdDirectory = Path.GetDirectoryName(settings.SteamCmdPath) ?? "";
+        var manifests = new[]
+        {
+            Path.Combine(settings.InstallDirectory, "steamapps", "workshop", "appworkshop_108600.acf"),
+            Path.Combine(steamCmdDirectory, "steamapps", "workshop", "appworkshop_108600.acf")
+        }.Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var manifest in manifests)
+        {
+            if (!File.Exists(manifest)) continue;
+            try
+            {
+                string text;
+                using (var stream = new FileStream(manifest, FileMode.Open, FileAccess.Read,
+                           FileShare.ReadWrite | FileShare.Delete))
+                using (var reader = new StreamReader(stream, Encoding.UTF8, true))
+                    text = reader.ReadToEnd();
+                foreach (var pair in ParseInstalledWorkshopUpdateTimes(text, ids))
+                    if (!result.TryGetValue(pair.Key, out var existing) || pair.Value > existing)
+                        result[pair.Key] = pair.Value;
+            }
+            catch (Exception ex)
+            {
+                Log($"無法讀取 Workshop manifest {manifest}：{ex.Message}");
+            }
+        }
+        return result;
+    }
+
+    private static Dictionary<string, long> ParseInstalledWorkshopUpdateTimes(
+        string manifestText, IEnumerable<string> ids)
+    {
+        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in ids.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (Match idMatch in Regex.Matches(manifestText,
+                         $"\"{Regex.Escape(id)}\"\\s*\\{{",
+                         RegexOptions.CultureInvariant))
+            {
+                var opening = manifestText.IndexOf('{', idMatch.Index + idMatch.Length - 1);
+                if (opening < 0) continue;
+                var end = FindBalancedBlockEnd(manifestText, opening);
+                if (end <= opening) continue;
+                var block = manifestText[opening..end];
+                var timeMatch = Regex.Match(block,
+                    "\"timeupdated\"\\s*\"(?<value>\\d+)\"",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (!timeMatch.Success ||
+                    !long.TryParse(timeMatch.Groups["value"].Value,
+                        NumberStyles.None, CultureInfo.InvariantCulture, out var value))
+                    continue;
+                if (!result.TryGetValue(id, out var existing) || value > existing)
+                    result[id] = value;
+            }
+        }
+        return result;
+    }
+
+    private async Task<Dictionary<string, long>> FetchPublishedWorkshopUpdateTimesAsync(
+        IReadOnlyList<string> ids)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("PZServerManager/" + AppVersion);
+        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var batch in ids.Chunk(100))
+        {
+            var values = new List<KeyValuePair<string, string>>
+            {
+                new("itemcount", batch.Length.ToString(CultureInfo.InvariantCulture))
+            };
+            for (var index = 0; index < batch.Length; index++)
+                values.Add(new($"publishedfileids[{index}]", batch[index]));
+            using var response = await client.PostAsync(
+                "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+                new FormUrlEncodedContent(values));
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync();
+            foreach (var pair in ParsePublishedWorkshopUpdateTimes(json))
+                result[pair.Key] = pair.Value;
+        }
+        return result;
+    }
+
+    private static Dictionary<string, long> ParsePublishedWorkshopUpdateTimes(string json)
+    {
+        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("response", out var response) ||
+            !response.TryGetProperty("publishedfiledetails", out var details) ||
+            details.ValueKind != JsonValueKind.Array)
+            return result;
+        foreach (var item in details.EnumerateArray())
+        {
+            if (!item.TryGetProperty("result", out var itemResult) ||
+                itemResult.GetInt32() != 1 ||
+                !item.TryGetProperty("publishedfileid", out var idElement) ||
+                !item.TryGetProperty("time_updated", out var timeElement))
+                continue;
+            var id = idElement.GetString() ?? "";
+            if (id.Length == 0 || !timeElement.TryGetInt64(out var time)) continue;
+            result[id] = time;
+        }
+        return result;
+    }
+
+    private static int FindBalancedBlockEnd(string text, int opening)
+    {
+        var depth = 0;
+        for (var index = opening; index < text.Length; index++)
+        {
+            if (text[index] == '{') depth++;
+            else if (text[index] == '}' && --depth == 0) return index + 1;
+        }
+        return -1;
+    }
+
+    private void UpdateWorkshopUpdateStatus()
+    {
+        if (serverProcess is not { HasExited: false })
+        {
+            LocalizationService.SetText(WorkshopUpdateStatusText,
+                "模組更新：伺服器未啟動");
+            return;
+        }
+        if (!settings.AutoWorkshopUpdate)
+        {
+            LocalizationService.SetText(WorkshopUpdateStatusText,
+                "模組更新：監控已停用");
+            return;
+        }
+        if (pendingWorkshopUpdateIds.Count > 0)
+        {
+            LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+                "模組更新：偵測到 {0} 個更新；下次確認 {1}",
+                pendingWorkshopUpdateIds.Count,
+                nextWorkshopUpdateCheck?.ToString("HH:mm") ?? "—");
+            return;
+        }
+        LocalizationService.SetFormattedText(WorkshopUpdateStatusText,
+            "模組更新：下次檢查 {0}",
+            nextWorkshopUpdateCheck?.ToString("HH:mm") ?? "—");
+    }
+
     private async void ScheduleTimer_Tick(object? sender, EventArgs e)
     {
         UpdateNextRestartText();
         if (serverProcess is not { HasExited: false }) return;
+        if (settings.AutoWorkshopUpdate &&
+            nextWorkshopUpdateCheck is not null &&
+            DateTime.Now >= nextWorkshopUpdateCheck.Value)
+        {
+            nextWorkshopUpdateCheck = DateTime.Now.AddMinutes(
+                settings.WorkshopUpdateCheckMinutes);
+            await CheckWorkshopUpdatesAsync();
+        }
+        if (settings.AutoWorkshopUpdate &&
+            settings.WorkshopUpdateBroadcast &&
+            pendingWorkshopUpdateIds.Count > 0 &&
+            nextWorkshopUpdateAnnouncement is not null &&
+            DateTime.Now >= nextWorkshopUpdateAnnouncement.Value)
+        {
+            await EvaluatePendingWorkshopUpdatesAsync();
+        }
         if (nextPlayerQuery is not null && DateTime.Now >= nextPlayerQuery.Value)
         {
             nextPlayerQuery = DateTime.Now.AddMinutes(settings.PlayerQueryMinutes);
@@ -3411,11 +3823,11 @@ SandboxVars = {
     private async void RefreshPlayers_Click(object sender, RoutedEventArgs e) =>
         await QueryOnlinePlayersAsync();
 
-    private async Task QueryOnlinePlayersAsync()
+    private async Task<int?> QueryOnlinePlayersAsync()
     {
         var queriedProcess = serverProcess;
         if (queriedProcess is not { HasExited: false } || Interlocked.Exchange(ref playerQueryRunning, 1) != 0)
-            return;
+            return null;
         try
         {
             lock (playerQueryLock) playerQueryOutput.Clear();
@@ -3424,11 +3836,12 @@ SandboxVars = {
             await Task.Delay(2500);
             capturePlayerQueryOutput = false;
             if (!ReferenceEquals(serverProcess, queriedProcess) || queriedProcess.HasExited)
-                return;
+                return null;
             string response;
             lock (playerQueryLock) response = string.Join(Environment.NewLine, playerQueryOutput);
-            ApplyOnlinePlayerResponse(response, "伺服器控制台");
+            var count = ApplyOnlinePlayerResponse(response, "伺服器控制台");
             nextPlayerQuery = DateTime.Now.AddMinutes(settings.PlayerQueryMinutes);
+            return count;
         }
         finally
         {
@@ -3437,9 +3850,12 @@ SandboxVars = {
         }
     }
 
-    private void ApplyOnlinePlayerResponse(string response, string source)
+    private int? ApplyOnlinePlayerResponse(string response, string source)
     {
         var players = ParseOnlinePlayers(response, out var reportedCount);
+        var verifiedCount = reportedCount >= 0 ? reportedCount :
+            players.Count > 0 ? players.Count : (int?)null;
+        lastKnownOnlinePlayerCount = verifiedCount;
         OnlinePlayersListBox.ItemsSource = players;
         if (players.Count > 0)
             LocalizationService.SetFormattedText(OnlinePlayerSummaryText,
@@ -3447,10 +3863,16 @@ SandboxVars = {
         else if (reportedCount > 0)
             LocalizationService.SetFormattedText(OnlinePlayerSummaryText,
                 "在線 {0} 人（名稱未能解析）• {1}", reportedCount, source);
-        else
+        else if (reportedCount == 0)
             LocalizationService.SetFormattedText(OnlinePlayerSummaryText,
                 "目前無玩家 • {0} • {1}", source, DateTime.Now.ToString("HH:mm"));
-        Log($"在線玩家已更新：{(reportedCount >= 0 ? reportedCount : players.Count)} 人（{source}）。");
+        else
+            LocalizationService.SetFormattedText(OnlinePlayerSummaryText,
+                "無法確認在線人數 • {0} • {1}", source, DateTime.Now.ToString("HH:mm"));
+        Log(verifiedCount is null
+            ? $"在線玩家查詢沒有完整回應（{source}）；不會據此自動重啟。"
+            : $"在線玩家已更新：{verifiedCount.Value} 人（{source}）。");
+        return verifiedCount;
     }
 
     private static List<string> ParseOnlinePlayers(string response, out int reportedCount)
@@ -3629,6 +4051,11 @@ SandboxVars = {
     private string FormatRestartMessage(int minutes) =>
         settings.RestartWarningMessage.Replace("{minutes}", minutes.ToString())
             .Replace("\r", " ").Replace("\n", " ").Replace("\"", "'");
+    private string FormatWorkshopUpdateMessage() =>
+        (string.IsNullOrWhiteSpace(settings.WorkshopUpdateWarningMessage)
+            ? new ServerSettings().WorkshopUpdateWarningMessage
+            : settings.WorkshopUpdateWarningMessage)
+        .Replace("\r", " ").Replace("\n", " ").Replace("\"", "'");
     private static void SelectByTag(System.Windows.Controls.ComboBox combo, int value)
     {
         combo.SelectedItem = combo.Items.Cast<System.Windows.Controls.ComboBoxItem>()

@@ -84,4 +84,10 @@ public sealed class ServerSettings
     public bool BackupBeforeRestart { get; set; } = true;
     public string RestartWarningMessage { get; set; } =
         "伺服器將在 {minutes} 分鐘後安全重啟，請移動到安全地點。";
+    public bool AutoWorkshopUpdate { get; set; } = true;
+    public int WorkshopUpdateCheckMinutes { get; set; } = 5;
+    public bool WorkshopUpdateBroadcast { get; set; } = true;
+    public int WorkshopUpdateAnnouncementMinutes { get; set; } = 30;
+    public string WorkshopUpdateWarningMessage { get; set; } =
+        "偵測到模組更新；伺服器將在所有玩家離線後自動重啟更新。";
 }

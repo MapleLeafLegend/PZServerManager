@@ -16,7 +16,7 @@
       <StackPanel Orientation="Horizontal">
        <TextBlock Text="BUILD 42 伺服器管理器" FontWeight="SemiBold" FontSize="25"/>
        <Border Background="#8A641F" CornerRadius="3" Padding="7,2" Margin="10,5,0,3">
-       <TextBlock x:Name="HeaderVersionText" Text="v1.9.0" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
+       <TextBlock x:Name="HeaderVersionText" Text="v1.9.2" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
        </Border>
       </StackPanel>
      </StackPanel>
@@ -446,28 +446,72 @@
       <Button Content="儲存全部設定" Background="#8A641F" Click="SaveFullConfig_Click"/>
       <Button Content="儲存原始編輯器內容" Click="SaveRaw_Click"/>
      </StackPanel>
-    </Grid>
+   </Grid>
    </TabItem>
    <TabItem Header=" 自動化 ">
-    <StackPanel Margin="25" MaxWidth="650" HorizontalAlignment="Left">
-     <TextBlock Text="定時安全重啟" FontSize="23" FontWeight="SemiBold" Margin="0,0,0,12"/>
-     <CheckBox x:Name="AutoRestartCheck" Content="啟用定時重啟" FontSize="16"/>
-     <Grid Margin="0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
-      <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-      <Label Content="每隔幾小時重啟"/><TextBox x:Name="RestartHoursBox" Grid.Column="1"/>
-      <Label Grid.Row="1" Content="提前幾分鐘通知"/><TextBox x:Name="WarningMinutesBox" Grid.Row="1" Grid.Column="1"/>
-      <Label Grid.Row="2" Content="在線玩家查詢間隔（分鐘）"/><TextBox x:Name="PlayerQueryMinutesBox" Grid.Row="2" Grid.Column="1" ToolTip="伺服器啟動後會反灰；允許 1–1440 分鐘"/>
-     </Grid>
-     <CheckBox x:Name="BackupCheck" Content="重啟前建立 ZIP 備份"/>
-     <TextBlock Text="倒數公告（{minutes} 會代入剩餘分鐘）" Foreground="#E1A84B" Margin="5,12,5,0"/>
-     <TextBox x:Name="RestartMessageBox" TextWrapping="Wrap" Height="64" AcceptsReturn="True"/>
-     <TextBlock Text="流程：遊戲內倒數公告 → save → ZIP 備份 → quit → 等候程序結束 → 再次啟動。排程從伺服器成功啟動時計算。" Foreground="#AFC0C8" TextWrapping="Wrap" Margin="5,12"/>
-     <StackPanel Orientation="Horizontal">
-      <Button Content="儲存排程" Click="SaveSchedule_Click"/>
-      <Button Content="測試安全重啟" Background="#8A641F" Click="RestartNow_Click"/>
-     </StackPanel>
-     <TextBlock x:Name="NextRestartText" Text="下次重啟：未排程" FontSize="16" Foreground="#E1A84B" Margin="5,15"/>
-    </StackPanel>
+    <Grid Margin="18">
+     <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <Grid Margin="6">
+       <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/>
+       </Grid.ColumnDefinitions>
+       <Border Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="8" Padding="20">
+        <StackPanel>
+         <TextBlock Text="定時安全重啟" FontSize="23" FontWeight="SemiBold" Margin="0,0,0,12"/>
+         <CheckBox x:Name="AutoRestartCheck" Content="啟用定時重啟" FontSize="16"/>
+         <Grid Margin="0,8">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Label Content="每隔幾小時重啟"/><TextBox x:Name="RestartHoursBox" Grid.Column="1"/>
+          <Label Grid.Row="1" Content="提前幾分鐘通知"/><TextBox x:Name="WarningMinutesBox" Grid.Row="1" Grid.Column="1"/>
+          <Label Grid.Row="2" Content="在線玩家查詢間隔（分鐘）"/><TextBox x:Name="PlayerQueryMinutesBox" Grid.Row="2" Grid.Column="1"
+           ToolTip="伺服器啟動後會反灰；允許 1–1440 分鐘"/>
+         </Grid>
+         <CheckBox x:Name="BackupCheck" Content="重啟前建立 ZIP 備份"/>
+         <TextBlock Text="倒數公告（{minutes} 會代入剩餘分鐘）" Foreground="#E1A84B" Margin="5,12,5,0"/>
+         <TextBox x:Name="RestartMessageBox" TextWrapping="Wrap" Height="64" AcceptsReturn="True"/>
+         <TextBlock Text="流程：遊戲內倒數公告 → save → ZIP 備份 → quit → 等候程序結束 → 再次啟動。排程從伺服器成功啟動時計算。"
+          Foreground="#AFC0C8" TextWrapping="Wrap" Margin="5,12"/>
+         <TextBlock x:Name="NextRestartText" Text="下次重啟：未排程" FontSize="16" Foreground="#E1A84B" Margin="5,10"/>
+        </StackPanel>
+       </Border>
+       <Border Grid.Column="2" Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="8" Padding="20">
+        <StackPanel>
+         <TextBlock Text="Workshop 模組更新" FontSize="23" FontWeight="SemiBold" Margin="0,0,0,12"/>
+         <CheckBox x:Name="AutoWorkshopUpdateCheck" Content="啟用模組更新檢查" FontSize="16"
+          Checked="WorkshopAutomationOptionChanged" Unchecked="WorkshopAutomationOptionChanged"/>
+         <Grid Margin="0,8">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+          <Label Content="模組更新檢查間隔（分鐘）"/>
+          <TextBox x:Name="WorkshopUpdateCheckMinutesBox" Grid.Column="1"
+           ToolTip="允許 1–1440 分鐘；預設 5 分鐘"/>
+         </Grid>
+         <CheckBox x:Name="WorkshopUpdateBroadcastCheck" Content="啟用等待玩家離線公告" FontSize="16" Margin="0,8,0,0"
+          Checked="WorkshopAutomationOptionChanged" Unchecked="WorkshopAutomationOptionChanged"/>
+         <Grid Margin="0,8">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+          <Label Content="有玩家時公告間隔（分鐘）"/>
+          <TextBox x:Name="WorkshopUpdateAnnouncementMinutesBox" Grid.Column="1"
+           ToolTip="第一次立即公告；後續允許 1–1440 分鐘"/>
+         </Grid>
+         <TextBlock Text="偵測到更新時會確認在線人數：無人則安全重啟；有人且公告已開啟時立即公告一次，後續依公告間隔重複，並持續等待所有玩家離線。"
+          Foreground="#AFC0C8" TextWrapping="Wrap" Margin="5,8"/>
+         <TextBlock Text="等待玩家離線公告" Foreground="#E1A84B" Margin="5,10,5,0"/>
+         <TextBox x:Name="WorkshopUpdateMessageBox" TextWrapping="Wrap" Height="64" AcceptsReturn="True"/>
+         <TextBlock x:Name="WorkshopUpdateStatusText" Text="模組更新：伺服器未啟動"
+          FontSize="15" Foreground="#E1A84B" TextWrapping="Wrap" Margin="5,14"/>
+        </StackPanel>
+       </Border>
+      </Grid>
+     </ScrollViewer>
+     <Border Grid.Row="1" BorderBrush="#354650" BorderThickness="0,1,0,0" Padding="6,12,6,0">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+       <Button Content="儲存自動化設定" Click="SaveSchedule_Click"/>
+       <Button Content="測試安全重啟" Background="#8A641F" Click="RestartNow_Click"/>
+      </StackPanel>
+     </Border>
+    </Grid>
    </TabItem>
   </TabControl>
   <Grid x:Name="SetupOverlay" Grid.Row="1" Background="#101619" Panel.ZIndex="20">
