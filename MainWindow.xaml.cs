@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     private bool closeAfterServerStops;
     private bool setupOperationRunning;
     private bool spawnRegionSelectionTouched;
+    private bool currentStartInteractive = true;
     private DateTime? setupActivityStarted;
     private string? startupConfigWarning;
     private string? loadedConfigIdentity;
@@ -75,6 +76,10 @@ public partial class MainWindow : Window
         ["DefaultPort"]="16261", ["UDPPort"]="16262", ["DoLuaChecksum"]="true", ["Public"]="false",
         ["MaxPlayers"]="32", ["PingLimit"]="400", ["HoursForLootRespawn"]="0",
         ["SpawnItems"]="", ["CharacterFreePoints"]="0", ["StarterKit"]="false", ["Map"]="Muldraugh, KY",
+        ["StatsDecrease"]="3", ["EndRegen"]="3", ["Nutrition"]="true",
+        ["InjurySeverity"]="2", ["BoneFracture"]="true", ["ClothingDegradation"]="3",
+        ["MultiHitZombies"]="false", ["RearVulnerability"]="3", ["BloodLevel"]="3",
+        ["PlayerDamageFromCrash"]="true",
         ["MaxItemsForLootRespawn"]="5", ["ConstructionPreventsLootRespawn"]="true",
         ["MinutesPerPage"]="1.0", ["SaveWorldEveryMinutes"]="0", ["PlayerSafehouse"]="true",
         ["AdminSafehouse"]="true", ["RCONPort"]="27015", ["SleepAllowed"]="false",
@@ -89,7 +94,8 @@ public partial class MainWindow : Window
         ["OtherLootNew"]="0.6", ["MultiplierConfig.Global"]="1.0",
         ["AllowNonAsciiUsername"]="false", ["AnnounceDeath"]="false", ["MaxAccountsPerUser"]="0",
         ["MapRemotePlayerVisibility"]="1", ["PlayerRespawnWithSelf"]="false",
-        ["PlayerRespawnWithOther"]="false", ["Faction"]="true", ["FactionDaySurvivedToCreate"]="0",
+        ["PlayerRespawnWithOther"]="false", ["SafehouseAllowRespawn"]="false",
+        ["Faction"]="true", ["FactionDaySurvivedToCreate"]="0",
         ["SafehouseDaySurvivedToClaim"]="0", ["SafeHouseRemovalTime"]="144",
         ["PVPFirearmDamageModifier"]="50.0", ["PVPMeleeDamageModifier"]="30.0", ["SpeedLimit"]="70.0",
         ["DenyLoginOnOverloadedServer"]="true", ["LoginQueueEnabled"]="false",
@@ -130,6 +136,12 @@ public partial class MainWindow : Window
             ["MedicalLootNew"] = (0, 4, "0.00–4.00"),
             ["OtherLootNew"] = (0, 4, "0.00–4.00"),
             ["CharacterFreePoints"] = (-100, 100, "-100–100"),
+            ["StatsDecrease"] = (1, 4, "1–4"),
+            ["EndRegen"] = (1, 4, "1–4"),
+            ["InjurySeverity"] = (1, 3, "1–3"),
+            ["ClothingDegradation"] = (1, 4, "1–4"),
+            ["RearVulnerability"] = (1, 3, "1–3"),
+            ["BloodLevel"] = (1, 5, "1–5"),
             ["ZombieConfig.PopulationMultiplier"] = (0, 4, "0.00–4.00"),
             ["ZombieConfig.PopulationPeakMultiplier"] = (0, 4, "0.00–4.00"),
             ["ZombieConfig.PopulationPeakDay"] = (1, 365, "1–365"),
@@ -651,6 +663,16 @@ public partial class MainWindow : Window
         BuiltInBackupsBox.Text = settings.BuiltInBackups.ToString(); LootRespawnHoursBox.Text = settings.LootRespawnHours.ToString();
         CharacterFreePointsBox.Text = settings.CharacterFreePoints.ToString();
         SpawnItemsBox.Text = settings.SpawnItems; StarterKitCheck.IsChecked = settings.StarterKit;
+        SelectByTag(StatsDecreaseCombo, settings.StatsDecrease);
+        SelectByTag(EndRegenCombo, settings.EndRegen);
+        NutritionCheck.IsChecked = settings.Nutrition;
+        SelectByTag(InjurySeverityCombo, settings.InjurySeverity);
+        BoneFractureCheck.IsChecked = settings.BoneFracture;
+        SelectByTag(ClothingDegradationCombo, settings.ClothingDegradation);
+        MultiHitZombiesCheck.IsChecked = settings.MultiHitZombies;
+        SelectByTag(RearVulnerabilityCombo, settings.RearVulnerability);
+        SelectByTag(BloodLevelCombo, settings.BloodLevel);
+        PlayerDamageFromCrashCheck.IsChecked = settings.PlayerDamageFromCrash;
         WelcomeBox.Text = settings.WelcomeMessage; WorkshopBox.Text = settings.WorkshopItems; ModsBox.Text = settings.Mods;
         MapFoldersBox.Text = settings.MapFolders;
         ResolvedModsText.Text = string.IsNullOrWhiteSpace(settings.Mods) ? "尚未解析" : $"已解析：{settings.Mods}";
@@ -670,6 +692,7 @@ public partial class MainWindow : Window
         SelectByTag(MapRemotePlayerVisibilityBox, settings.MapRemotePlayerVisibility);
         PlayerRespawnWithSelfCheck.IsChecked = settings.PlayerRespawnWithSelf;
         PlayerRespawnWithOtherCheck.IsChecked = settings.PlayerRespawnWithOther;
+        SafehouseAllowRespawnCheck.IsChecked = settings.SafehouseAllowRespawn;
         FactionCheck.IsChecked = settings.Faction;
         FactionDaysBox.Text = settings.FactionDaySurvivedToCreate.ToString();
         SafehouseDaysBox.Text = settings.SafehouseDaySurvivedToClaim.ToString();
@@ -702,7 +725,7 @@ public partial class MainWindow : Window
 
     private bool UiToSettings(bool showError = true)
     {
-        if (resolvedModEntries.Count > 0 && !ApplyResolvedMods(showError)) return false;
+        if (resolvedModEntries.Count > 0 && !ApplyResolvedMods(false, showError)) return false;
         if (spawnRegionSelectionTouched && !ValidateMapSelections(showError)) return false;
         var autoWorkshopUpdate = AutoWorkshopUpdateCheck.IsChecked == true;
         var workshopUpdateBroadcast = WorkshopUpdateBroadcastCheck.IsChecked == true;
@@ -843,6 +866,16 @@ public partial class MainWindow : Window
         settings.CharacterFreePoints = characterFreePoints;
         settings.SpawnItems = SpawnItemsBox.Text.Trim();
         settings.StarterKit = StarterKitCheck.IsChecked == true;
+        settings.StatsDecrease = SelectedTag(StatsDecreaseCombo, 3);
+        settings.EndRegen = SelectedTag(EndRegenCombo, 3);
+        settings.Nutrition = NutritionCheck.IsChecked == true;
+        settings.InjurySeverity = SelectedTag(InjurySeverityCombo, 2);
+        settings.BoneFracture = BoneFractureCheck.IsChecked == true;
+        settings.ClothingDegradation = SelectedTag(ClothingDegradationCombo, 3);
+        settings.MultiHitZombies = MultiHitZombiesCheck.IsChecked == true;
+        settings.RearVulnerability = SelectedTag(RearVulnerabilityCombo, 3);
+        settings.BloodLevel = SelectedTag(BloodLevelCombo, 3);
+        settings.PlayerDamageFromCrash = PlayerDamageFromCrashCheck.IsChecked == true;
         settings.DayLength = SelectedTag(DayLengthCombo, 3); settings.WaterShutDays = water;
         settings.ElectricityShutDays = electric; settings.XpMultiplier = xp;
         settings.FoodLoot = foodLoot; settings.WeaponLoot = weaponLoot;
@@ -859,6 +892,7 @@ public partial class MainWindow : Window
         settings.MapRemotePlayerVisibility = mapVisibility;
         settings.PlayerRespawnWithSelf = PlayerRespawnWithSelfCheck.IsChecked == true;
         settings.PlayerRespawnWithOther = PlayerRespawnWithOtherCheck.IsChecked == true;
+        settings.SafehouseAllowRespawn = SafehouseAllowRespawnCheck.IsChecked == true;
         settings.Faction = FactionCheck.IsChecked == true;
         settings.FactionDaySurvivedToCreate = factionDays;
         settings.SafehouseDaySurvivedToClaim = safehouseDays;
@@ -1090,6 +1124,7 @@ public partial class MainWindow : Window
                 ["MapRemotePlayerVisibility"] = settings.MapRemotePlayerVisibility.ToString(),
                 ["PlayerRespawnWithSelf"] = Bool(settings.PlayerRespawnWithSelf),
                 ["PlayerRespawnWithOther"] = Bool(settings.PlayerRespawnWithOther),
+                ["SafehouseAllowRespawn"] = Bool(settings.SafehouseAllowRespawn),
                 ["Faction"] = Bool(settings.Faction),
                 ["FactionDaySurvivedToCreate"] = settings.FactionDaySurvivedToCreate.ToString(),
                 ["SafehouseDaySurvivedToClaim"] = settings.SafehouseDaySurvivedToClaim.ToString(),
@@ -1182,7 +1217,17 @@ SandboxVars = {
             ["OtherLootNew"] = LuaNumber(settings.OtherLoot),
             ["HoursForLootRespawn"] = settings.LootRespawnHours.ToString(),
             ["CharacterFreePoints"] = settings.CharacterFreePoints.ToString(),
-            ["StarterKit"] = Bool(settings.StarterKit)
+            ["StarterKit"] = Bool(settings.StarterKit),
+            ["StatsDecrease"] = settings.StatsDecrease.ToString(),
+            ["EndRegen"] = settings.EndRegen.ToString(),
+            ["Nutrition"] = Bool(settings.Nutrition),
+            ["InjurySeverity"] = settings.InjurySeverity.ToString(),
+            ["BoneFracture"] = Bool(settings.BoneFracture),
+            ["ClothingDegradation"] = settings.ClothingDegradation.ToString(),
+            ["MultiHitZombies"] = Bool(settings.MultiHitZombies),
+            ["RearVulnerability"] = settings.RearVulnerability.ToString(),
+            ["BloodLevel"] = settings.BloodLevel.ToString(),
+            ["PlayerDamageFromCrash"] = Bool(settings.PlayerDamageFromCrash)
         };
         foreach (var pair in top) text = ReplaceLuaValue(text, pair.Key, pair.Value, null, true);
         text = ReplaceLuaValue(text, "Global", LuaNumber(settings.XpMultiplier), "MultiplierConfig", true);
@@ -1311,29 +1356,38 @@ SandboxVars = {
         Log($"已將 JVM 最大記憶體設為 {settings.MemoryGb} GB。");
     }
 
-    private async void Start_Click(object sender, RoutedEventArgs e) => await StartServerAsync();
+    private async void Start_Click(object sender, RoutedEventArgs e) => await StartServerAsync(true);
 
-    private Task StartServerAsync()
+    private Task StartServerAsync(bool interactive)
     {
         if (serverProcess is { HasExited: false }) return Task.CompletedTask;
-        if (!UiToSettings()) return Task.CompletedTask;
-        PersistSettings();
+        if (interactive && !UiToSettings(true))
+        {
+            return Task.CompletedTask;
+        }
+        if (interactive)
+            PersistSettings();
+        else
+            Log("自動啟動使用上次已驗證並儲存的設定；不重新套用 GUI，也不顯示阻塞式對話框。");
         var launcher = new[] { "StartServer64.bat", "start-server.bat", "StartServer32.bat" }
             .Select(x => Path.Combine(settings.InstallDirectory, x)).FirstOrDefault(File.Exists);
         if (launcher == null)
         {
-            MessageBox.Show("找不到伺服器啟動批次檔，請先執行「安裝 / 更新伺服器」。");
+            ReportStartBlocker(interactive,
+                "找不到伺服器啟動批次檔，請先執行「安裝 / 更新伺服器」。",
+                "找不到啟動批次檔");
             return Task.CompletedTask;
         }
         var databasePath = Path.Combine(settings.DataDirectory, "db", settings.ServerName + ".db");
         if (!File.Exists(databasePath) && string.IsNullOrWhiteSpace(settings.AdminPassword))
         {
-            MessageBox.Show(
+            ReportStartBlocker(interactive,
                 "Build 42 首次建立伺服器資料庫時必須設定管理員密碼。\n\n" +
                 "請在「基礎設定」填入管理員密碼後再啟動。管理器尚未修改任何 PZ 檔案。",
-                "首次啟動需要管理員密碼", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "首次啟動需要管理員密碼");
             return Task.CompletedTask;
         }
+        currentStartInteractive = interactive;
         intentionalStop = false;
         roleInitializationFailure = false;
         var iniPath = Path.Combine(settings.DataDirectory, "Server", settings.ServerName + ".ini");
@@ -1449,7 +1503,7 @@ SandboxVars = {
             if (roleInitializationFailure)
             {
                 roleInitializationFailure = false;
-                MessageBox.Show(
+                var roleFailureMessage =
                     "Build 42 無法從目前資料庫取得預設使用者角色，因此伺服器在建立世界前退出。\n\n" +
                     "這通常是舊版或未完成初始化的 db\\<伺服器名稱>.db，不是 map_t.bin 或 Sandbox 編碼錯誤。\n\n" +
                     "請依序處理：\n" +
@@ -1457,8 +1511,13 @@ SandboxVars = {
                     "2. 先改用一個全新的設定檔名稱啟動，確認 B42 能建立乾淨資料庫（不會刪除舊資料）。\n" +
                     "3. 若仍失敗，暫時清空 WorkshopItems 與 Mods，以純原版啟動。\n" +
                     "4. 純原版成功後，再逐項加入你要使用的 Workshop 模組，找出造成初始化失敗的項目。\n\n" +
-                    "管理器沒有刪除、重建或覆寫你的資料庫與世界存檔。",
-                    "Build 42 角色資料庫初始化失敗", MessageBoxButton.OK, MessageBoxImage.Error);
+                    "管理器沒有刪除、重建或覆寫你的資料庫與世界存檔。";
+                if (currentStartInteractive)
+                    MessageBox.Show(roleFailureMessage,
+                        "Build 42 角色資料庫初始化失敗",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                else
+                    Log("自動啟動失敗：" + roleFailureMessage.Replace("\n", " "));
             }
             if (restartAfterStop)
             {
@@ -1466,7 +1525,7 @@ SandboxVars = {
                 workshopRestartInProgress = false;
                 Log("5 秒後重新啟動…");
                 await Task.Delay(5000);
-                await StartServerAsync();
+                await StartServerAsync(false);
             }
             else
             {
@@ -1483,6 +1542,15 @@ SandboxVars = {
     }
 
     private async void Stop_Click(object sender, RoutedEventArgs e) => await SafeStopAsync(false);
+
+    private void ReportStartBlocker(bool interactive, string message, string title)
+    {
+        Log($"{title}：{message.Replace("\r", " ").Replace("\n", " ")}");
+        if (interactive)
+            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+        else
+            SetStatus("自動啟動失敗", "#D9695F");
+    }
 
     private void SaveWorld_Click(object sender, RoutedEventArgs e)
     {
@@ -1753,6 +1821,7 @@ SandboxVars = {
             ["MapRemotePlayerVisibility"] = value.MapRemotePlayerVisibility.ToString(),
             ["PlayerRespawnWithSelf"] = Bool(value.PlayerRespawnWithSelf),
             ["PlayerRespawnWithOther"] = Bool(value.PlayerRespawnWithOther),
+            ["SafehouseAllowRespawn"] = Bool(value.SafehouseAllowRespawn),
             ["Faction"] = Bool(value.Faction),
             ["FactionDaySurvivedToCreate"] = value.FactionDaySurvivedToCreate.ToString(),
             ["SafehouseDaySurvivedToClaim"] = value.SafehouseDaySurvivedToClaim.ToString(),
@@ -1774,6 +1843,16 @@ SandboxVars = {
             ["Sandbox.HoursForLootRespawn"] = value.LootRespawnHours.ToString(),
             ["Sandbox.CharacterFreePoints"] = value.CharacterFreePoints.ToString(),
             ["Sandbox.StarterKit"] = Bool(value.StarterKit),
+            ["Sandbox.StatsDecrease"] = value.StatsDecrease.ToString(),
+            ["Sandbox.EndRegen"] = value.EndRegen.ToString(),
+            ["Sandbox.Nutrition"] = Bool(value.Nutrition),
+            ["Sandbox.InjurySeverity"] = value.InjurySeverity.ToString(),
+            ["Sandbox.BoneFracture"] = Bool(value.BoneFracture),
+            ["Sandbox.ClothingDegradation"] = value.ClothingDegradation.ToString(),
+            ["Sandbox.MultiHitZombies"] = Bool(value.MultiHitZombies),
+            ["Sandbox.RearVulnerability"] = value.RearVulnerability.ToString(),
+            ["Sandbox.BloodLevel"] = value.BloodLevel.ToString(),
+            ["Sandbox.PlayerDamageFromCrash"] = Bool(value.PlayerDamageFromCrash),
             ["MultiplierConfig.Global"] = LuaNumber(value.XpMultiplier),
             ["ZombieLore.Speed"] = value.ZombieSpeed.ToString(),
             ["ZombieLore.Strength"] = value.ZombieStrength.ToString(),
@@ -1826,7 +1905,7 @@ SandboxVars = {
 
             var (_, missingAfter) = FindInstalledModEntries(workshopIds, true);
             SortModEntriesByDependencies();
-            ApplyResolvedMods(false);
+            ApplyResolvedMods(false, false);
             if (missingAfter.Count > 0)
                 MessageBox.Show(
                     $"下列 Workshop 項目下載後仍找不到 mod.info／id：\n{string.Join("\n", missingAfter)}\n\n" +
@@ -2068,7 +2147,7 @@ SandboxVars = {
                 "需要解析模組", MessageBoxButton.OK, MessageBoxImage.Warning);
             return false;
         }
-        return ApplyResolvedMods(true);
+        return ApplyResolvedMods(false, true);
     }
 
     private (List<ModEntry> Entries, List<string> MissingWorkshopIds) FindInstalledModEntries(
@@ -2692,9 +2771,10 @@ SandboxVars = {
         RefreshMapCandidates(true);
     }
 
-    private void ApplySelectedMods_Click(object sender, RoutedEventArgs e) => ApplyResolvedMods(true);
+    private void ApplySelectedMods_Click(object sender, RoutedEventArgs e) =>
+        ApplyResolvedMods(true, true);
 
-    private bool ApplyResolvedMods(bool showMessage)
+    private bool ApplyResolvedMods(bool showSuccessMessage, bool showErrorMessage)
     {
         ResolvedModsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
         ResolvedModsGrid.CommitEdit(DataGridEditingUnit.Row, true);
@@ -2708,7 +2788,7 @@ SandboxVars = {
             .Select(pair => $"{pair.entry.ModId} → {pair.required}").Distinct().ToList();
         if (missing.Count > 0)
         {
-            if (showMessage) MessageBox.Show("下列已啟用模組缺少或未勾選依賴：\n\n" +
+            if (showErrorMessage) MessageBox.Show("下列已啟用模組缺少或未勾選依賴：\n\n" +
                 string.Join("\n", missing), "模組依賴未完成",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return false;
@@ -2722,7 +2802,7 @@ SandboxVars = {
             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (exclusive.Count > 0)
         {
-            if (showMessage) MessageBox.Show(
+            if (showErrorMessage) MessageBox.Show(
                 "下列 Mod ID 是同一功能的互斥版本，請只勾選其中一個：\n\n" +
                 string.Join("\n", exclusive), "模組互斥選項",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -2730,7 +2810,7 @@ SandboxVars = {
         }
         if (enabledIds.Contains("BetterGeneratorInfo"))
         {
-            if (showMessage) MessageBox.Show(
+            if (showErrorMessage) MessageBox.Show(
                 "Better Generator Info 的作者要求 Dedicated Server 關閉 DoLuaChecksum，" +
                 "但本管理器維持 Lua 校驗以避免客戶端腳本不一致。\n\n請停用此 Mod，或改由原始設定檔自行承擔風險。",
                 "Lua 校驗衝突", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -2741,7 +2821,7 @@ SandboxVars = {
         settings.Mods = mods;
         RefreshMapCandidates(true);
         ResolvedModsText.Text = $"待儲存：{enabled.Count} 個 Mod；Map={settings.MapFolders}";
-        if (showMessage) MessageBox.Show(
+        if (showSuccessMessage) MessageBox.Show(
             $"已套用 {enabled.Count} 個 Mod ID。\n" +
             "地圖請在下方逐項選擇，再按「套用地圖與重生點」。目前尚未寫入 PZ INI。",
             "已套用模組清單");
@@ -3338,6 +3418,7 @@ SandboxVars = {
         settings.MapRemotePlayerVisibility = IniInt(RawIniBox.Text, "MapRemotePlayerVisibility", defaults.MapRemotePlayerVisibility);
         settings.PlayerRespawnWithSelf = IniBool(RawIniBox.Text, "PlayerRespawnWithSelf", defaults.PlayerRespawnWithSelf);
         settings.PlayerRespawnWithOther = IniBool(RawIniBox.Text, "PlayerRespawnWithOther", defaults.PlayerRespawnWithOther);
+        settings.SafehouseAllowRespawn = IniBool(RawIniBox.Text, "SafehouseAllowRespawn", defaults.SafehouseAllowRespawn);
         settings.Faction = IniBool(RawIniBox.Text, "Faction", defaults.Faction);
         settings.FactionDaySurvivedToCreate = IniInt(RawIniBox.Text, "FactionDaySurvivedToCreate", defaults.FactionDaySurvivedToCreate);
         settings.SafehouseDaySurvivedToClaim = IniInt(RawIniBox.Text, "SafehouseDaySurvivedToClaim", defaults.SafehouseDaySurvivedToClaim);
@@ -3362,6 +3443,16 @@ SandboxVars = {
             settings.LootRespawnHours = LuaInt(RawSandboxBox.Text, "HoursForLootRespawn", defaults.LootRespawnHours);
             settings.CharacterFreePoints = LuaInt(RawSandboxBox.Text, "CharacterFreePoints", defaults.CharacterFreePoints);
             settings.StarterKit = LuaBool(RawSandboxBox.Text, "StarterKit", defaults.StarterKit);
+            settings.StatsDecrease = LuaInt(RawSandboxBox.Text, "StatsDecrease", defaults.StatsDecrease);
+            settings.EndRegen = LuaInt(RawSandboxBox.Text, "EndRegen", defaults.EndRegen);
+            settings.Nutrition = LuaBool(RawSandboxBox.Text, "Nutrition", defaults.Nutrition);
+            settings.InjurySeverity = LuaInt(RawSandboxBox.Text, "InjurySeverity", defaults.InjurySeverity);
+            settings.BoneFracture = LuaBool(RawSandboxBox.Text, "BoneFracture", defaults.BoneFracture);
+            settings.ClothingDegradation = LuaInt(RawSandboxBox.Text, "ClothingDegradation", defaults.ClothingDegradation);
+            settings.MultiHitZombies = LuaBool(RawSandboxBox.Text, "MultiHitZombies", defaults.MultiHitZombies);
+            settings.RearVulnerability = LuaInt(RawSandboxBox.Text, "RearVulnerability", defaults.RearVulnerability);
+            settings.BloodLevel = LuaInt(RawSandboxBox.Text, "BloodLevel", defaults.BloodLevel);
+            settings.PlayerDamageFromCrash = LuaBool(RawSandboxBox.Text, "PlayerDamageFromCrash", defaults.PlayerDamageFromCrash);
             settings.ZombieSpeed = LuaInt(RawSandboxBox.Text, "Speed", defaults.ZombieSpeed, "ZombieLore");
             settings.ZombieStrength = LuaInt(RawSandboxBox.Text, "Strength", defaults.ZombieStrength, "ZombieLore");
             settings.ZombieToughness = LuaInt(RawSandboxBox.Text, "Toughness", defaults.ZombieToughness, "ZombieLore");

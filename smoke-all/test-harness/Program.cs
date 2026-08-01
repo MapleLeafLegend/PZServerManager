@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Threading;
 using PZServerManager;
 
 internal static class Program
@@ -82,6 +83,7 @@ internal static class Program
             Text("PublicNameBox", "整合測試伺服器");
             Text("DescriptionBox", "繁體中文寫入驗證");
             Password("PasswordBox", "join-pass");
+            Password("AdminPasswordBox", "admin-pass");
             Checked("PublicCheck", true);
             Checked("OpenCheck", false);
             Checked("PauseCheck", false);
@@ -111,6 +113,16 @@ internal static class Program
             Text("XpBox", "2.5");
             Text("CharacterFreePointsBox", "12");
             Text("SpawnItemsBox", "Base.BaseballBat,Base.WaterBottle,Base.Chocolate");
+            Tag("StatsDecreaseCombo", "4");
+            Tag("EndRegenCombo", "1");
+            Checked("NutritionCheck", false);
+            Tag("InjurySeverityCombo", "3");
+            Checked("BoneFractureCheck", false);
+            Tag("ClothingDegradationCombo", "4");
+            Checked("MultiHitZombiesCheck", true);
+            Tag("RearVulnerabilityCombo", "2");
+            Tag("BloodLevelCombo", "5");
+            Checked("PlayerDamageFromCrashCheck", false);
             Text("FoodLootBox", "0.75");
             Text("WeaponLootBox", "0.8");
             Text("AmmoLootBox", "0.85");
@@ -132,6 +144,7 @@ internal static class Program
             Tag("MapRemotePlayerVisibilityBox", "3");
             Checked("PlayerRespawnWithSelfCheck", true);
             Checked("PlayerRespawnWithOtherCheck", true);
+            Checked("SafehouseAllowRespawnCheck", true);
             Checked("FactionCheck", false);
             Text("FactionDaysBox", "11");
             Text("SafehouseDaysBox", "12");
@@ -143,7 +156,8 @@ internal static class Program
             Checked("LoginQueueCheck", true);
             Text("LoginQueueTimeoutBox", "75");
 
-            Assert((bool)Invoke("UiToSettings", false)!, "Valid UI values were rejected.");
+            Assert((bool)Invoke("UiToSettings", true)!,
+                "Valid UI values were rejected or mod application showed a blocking success dialog.");
             var automationSettings = Field("settings").GetValue(window)!;
             Assert((bool)automationSettings.GetType().GetProperty("AutoWorkshopUpdate")!
                     .GetValue(automationSettings)! &&
@@ -175,6 +189,12 @@ internal static class Program
                 ["LootRespawnHours"] = "96", ["RconPassword"] = "new-rcon",
                 ["DayLength"] = "4", ["CharacterFreePoints"] = "12",
                 ["SpawnItems"] = "Base.BaseballBat,Base.WaterBottle,Base.Chocolate",
+                ["StatsDecrease"] = "4", ["EndRegen"] = "1", ["Nutrition"] = "False",
+                ["InjurySeverity"] = "3", ["BoneFracture"] = "False",
+                ["ClothingDegradation"] = "4", ["MultiHitZombies"] = "True",
+                ["RearVulnerability"] = "2", ["BloodLevel"] = "5",
+                ["PlayerDamageFromCrash"] = "False",
+                ["SafehouseAllowRespawn"] = "True",
                 ["PvpFirearmDamageModifier"] = "123.5", ["PvpMeleeDamageModifier"] = "234.5",
                 ["SpeedLimit"] = "99.5", ["LoginQueueConnectTimeout"] = "75"
             };
@@ -274,7 +294,7 @@ internal static class Program
                 "純客戶端候選", "Client-only mod was not classified as a whitelist candidate.");
             coreEntry.GetType().GetProperty("Enabled")!.SetValue(coreEntry, true);
             patchEntry.GetType().GetProperty("Enabled")!.SetValue(patchEntry, true);
-            Assert((bool)Invoke("ApplyResolvedMods", false)!,
+            Assert((bool)Invoke("ApplyResolvedMods", false, true)!,
                 "Valid dependency selection was rejected.");
             Assert(((TextBox)Control("ModsBox")).Text == "CoreMod;PatchMod",
                 "Applied Mods did not preserve dependency order.");
@@ -374,7 +394,7 @@ internal static class Program
                 spawnRegions.Contains("media/maps/Muldraugh, KY/spawnpoints.lua"),
                 "Selected map spawn region was not written to the managed Lua block.");
             coreEntry.GetType().GetProperty("Enabled")!.SetValue(coreEntry, false);
-            Assert(!(bool)Invoke("ApplyResolvedMods", false)!,
+            Assert(!(bool)Invoke("ApplyResolvedMods", false, false)!,
                 "A selected mod with a disabled dependency was incorrectly accepted.");
             coreEntry.GetType().GetProperty("Enabled")!.SetValue(coreEntry, true);
 
@@ -438,7 +458,7 @@ internal static class Program
                 ?? throw new MissingFieldException("CreatorText")).GetValue(about)!;
             var disclaimer = (TextBlock)(aboutType.GetField("DisclaimerText", Flags)
                 ?? throw new MissingFieldException("DisclaimerText")).GetValue(about)!;
-            Assert(aboutVersion.Text == "版本 v1.9.2",
+            Assert(aboutVersion.Text == "版本 v1.9.5",
                 $"About version is incorrect: {aboutVersion.Text}");
             Assert(creator.Text == "MapleLeaf", "About creator is incorrect.");
             var disclaimerText = new System.Windows.Documents.TextRange(
@@ -448,6 +468,30 @@ internal static class Program
             Assert(about.Icon != null, "About window icon was not loaded.");
             about.Close();
             Assert(window.Icon != null, "Main window icon was not loaded.");
+
+            var manualLogOffset = ((TextBox)Control("ConsoleBox")).Text.Length;
+            ((Task)Invoke("StartServerAsync", true)!).GetAwaiter().GetResult();
+            Assert(PumpUntil(() => Field("serverProcess").GetValue(window) == null, 5000),
+                "Manual start did not finish without a blocking dialog.");
+            Invoke("FlushPendingLogs");
+            var manualLog = ((TextBox)Control("ConsoleBox")).Text[manualLogOffset..];
+            Assert(manualLog.Contains("伺服器已啟動", StringComparison.Ordinal),
+                "Manual start never launched the test server.");
+
+            var validRestartHours = ((TextBox)Control("RestartHoursBox")).Text;
+            Text("RestartHoursBox", "此值故意無效以確認自動啟動不重讀 GUI");
+            var automaticLogOffset = ((TextBox)Control("ConsoleBox")).Text.Length;
+            ((Task)Invoke("StartServerAsync", false)!).GetAwaiter().GetResult();
+            Assert(PumpUntil(() => Field("serverProcess").GetValue(window) == null, 5000),
+                "Automatic restart path did not finish without a blocking dialog.");
+            Invoke("FlushPendingLogs");
+            var automaticLog = ((TextBox)Control("ConsoleBox")).Text[automaticLogOffset..];
+            Assert(automaticLog.Contains("自動啟動使用上次已驗證並儲存的設定", StringComparison.Ordinal) &&
+                automaticLog.Contains("伺服器已啟動", StringComparison.Ordinal),
+                "Automatic restart path re-read the GUI or failed to launch.");
+            Assert(!(bool)Field("currentStartInteractive").GetValue(window)!,
+                "Automatic restart was incorrectly marked as interactive.");
+            Text("RestartHoursBox", validRestartHours);
 
             window.Close();
             application.Shutdown();
@@ -514,6 +558,20 @@ internal static class Program
     private static void Assert(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static bool PumpUntil(Func<bool> condition, int timeoutMilliseconds)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            var frame = new DispatcherFrame();
+            Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,
+                new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
+            Thread.Sleep(10);
+        }
+        return condition();
     }
 
     private static void SelectContainingTabs(System.Windows.DependencyObject child)

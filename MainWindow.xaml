@@ -16,7 +16,7 @@
       <StackPanel Orientation="Horizontal">
        <TextBlock Text="BUILD 42 伺服器管理器" FontWeight="SemiBold" FontSize="25"/>
        <Border Background="#8A641F" CornerRadius="3" Padding="7,2" Margin="10,5,0,3">
-       <TextBlock x:Name="HeaderVersionText" Text="v1.9.2" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
+       <TextBlock x:Name="HeaderVersionText" Text="v1.9.5" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
        </Border>
       </StackPanel>
      </StackPanel>
@@ -239,6 +239,55 @@
         <TextBlock x:Name="LootSchemaHint" Text="B42 使用 0.00–4.00 小數倍率；數值越高，物資越多。" Foreground="#AFC0C8" TextWrapping="Wrap" Margin="10"/>
        </StackPanel>
       </Grid></ScrollViewer></TabItem>
+      <TabItem Header="玩家與生存"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="14">
+       <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+       <StackPanel>
+        <GroupBox Header="生理狀態與恢復"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="310"/><ColumnDefinition/></Grid.ColumnDefinitions>
+         <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+         <Label Content="飢餓／口渴／疲勞速度（預設：正常）"/>
+         <ComboBox x:Name="StatsDecreaseCombo" Grid.Column="1" Margin="4" ToolTip="Sandbox：StatsDecrease">
+          <ComboBoxItem Tag="1">非常快</ComboBoxItem><ComboBoxItem Tag="2">快</ComboBoxItem><ComboBoxItem Tag="3">正常（預設）</ComboBoxItem><ComboBoxItem Tag="4">慢</ComboBoxItem>
+         </ComboBox>
+         <Label Grid.Row="1" Content="耐力恢復速度（預設：正常）"/>
+         <ComboBox x:Name="EndRegenCombo" Grid.Row="1" Grid.Column="1" Margin="4" ToolTip="Sandbox：EndRegen">
+          <ComboBoxItem Tag="1">非常快</ComboBoxItem><ComboBoxItem Tag="2">快</ComboBoxItem><ComboBoxItem Tag="3">正常（預設）</ComboBoxItem><ComboBoxItem Tag="4">慢</ComboBoxItem>
+         </ComboBox>
+         <Label Grid.Row="2" Content="受傷嚴重度（預設：正常）"/>
+         <ComboBox x:Name="InjurySeverityCombo" Grid.Row="2" Grid.Column="1" Margin="4" ToolTip="Sandbox：InjurySeverity">
+          <ComboBoxItem Tag="1">低</ComboBoxItem><ComboBoxItem Tag="2">正常（預設）</ComboBoxItem><ComboBoxItem Tag="3">高</ComboBoxItem>
+         </ComboBox>
+         <Label Grid.Row="3" Content="衣物劣化速度（預設：正常）"/>
+         <ComboBox x:Name="ClothingDegradationCombo" Grid.Row="3" Grid.Column="1" Margin="4" ToolTip="Sandbox：ClothingDegradation">
+          <ComboBoxItem Tag="1">停用</ComboBoxItem><ComboBoxItem Tag="2">慢</ComboBoxItem><ComboBoxItem Tag="3">正常（預設）</ComboBoxItem><ComboBoxItem Tag="4">快</ComboBoxItem>
+         </ComboBox>
+        </Grid></GroupBox>
+        <GroupBox Header="生存規則"><StackPanel>
+         <CheckBox x:Name="NutritionCheck" Content="啟用營養系統（體重與食物營養影響角色；預設開啟）" ToolTip="Sandbox：Nutrition"/>
+         <CheckBox x:Name="BoneFractureCheck" Content="允許角色因撞擊、跌落或攻擊而骨折（預設開啟）" ToolTip="Sandbox：BoneFracture"/>
+         <CheckBox x:Name="PlayerDamageFromCrashCheck" Content="車禍會對車內玩家造成傷害（預設開啟）" ToolTip="Sandbox：PlayerDamageFromCrash"/>
+        </StackPanel></GroupBox>
+       </StackPanel>
+       <StackPanel Grid.Column="1">
+        <GroupBox Header="戰鬥與危險"><StackPanel>
+         <CheckBox x:Name="MultiHitZombiesCheck" Content="允許部分近戰武器一次擊中多個殭屍（預設關閉）" ToolTip="Sandbox：MultiHitZombies"/>
+         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="310"/><ColumnDefinition/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Label Content="背後受擊被咬風險（預設：高）"/>
+          <ComboBox x:Name="RearVulnerabilityCombo" Grid.Column="1" Margin="4" ToolTip="Sandbox：RearVulnerability">
+           <ComboBoxItem Tag="1">低</ComboBoxItem><ComboBoxItem Tag="2">中</ComboBoxItem><ComboBoxItem Tag="3">高（預設）</ComboBoxItem>
+          </ComboBox>
+          <Label Grid.Row="1" Content="血液噴濺量（預設：正常）"/>
+          <ComboBox x:Name="BloodLevelCombo" Grid.Row="1" Grid.Column="1" Margin="4" ToolTip="Sandbox：BloodLevel">
+           <ComboBoxItem Tag="1">無</ComboBoxItem><ComboBoxItem Tag="2">低</ComboBoxItem><ComboBoxItem Tag="3">正常（預設）</ComboBoxItem><ComboBoxItem Tag="4">高</ComboBoxItem><ComboBoxItem Tag="5">極多</ComboBoxItem>
+          </ComboBox>
+         </Grid>
+        </StackPanel></GroupBox>
+        <TextBlock Text="這些值來自 Build 42 SandboxVars。讀取既有伺服器時，以檔案目前值為準；只有欄位不存在時才使用上方標示的預設。"
+                   Foreground="#AFC0C8" TextWrapping="Wrap" Margin="10"/>
+        <TextBlock Text="飢餓速度依遊戲時間推進：若一天設為 30 分鐘，即使選擇「正常」，現實時間體感仍約為預設 1 小時日長的兩倍。想放慢可將一天調成 1–2 小時，並把此項設為「慢」。"
+                   Foreground="#E1A84B" TextWrapping="Wrap" Margin="10"/>
+       </StackPanel>
+      </Grid></ScrollViewer></TabItem>
       <TabItem Header="殭屍"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="14">
        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
        <StackPanel>
@@ -280,6 +329,7 @@
         <GroupBox Header="重生、派系與安全屋"><StackPanel>
          <CheckBox x:Name="PlayerRespawnWithSelfCheck" Content="允許新角色在上一個角色死亡位置重生"/>
          <CheckBox x:Name="PlayerRespawnWithOtherCheck" Content="允許分割畫面／Remote Play 玩家在其他本機角色旁重生"/>
+         <CheckBox x:Name="SafehouseAllowRespawnCheck" Content="允許安全屋成員選擇在自己的安全屋重生（預設關閉）"/>
          <CheckBox x:Name="FactionCheck" Content="啟用玩家派系"/>
          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="330"/><ColumnDefinition/></Grid.ColumnDefinitions>
           <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
@@ -487,7 +537,7 @@
           <TextBox x:Name="WorkshopUpdateCheckMinutesBox" Grid.Column="1"
            ToolTip="允許 1–1440 分鐘；預設 5 分鐘"/>
          </Grid>
-         <CheckBox x:Name="WorkshopUpdateBroadcastCheck" Content="啟用等待玩家離線公告" FontSize="16" Margin="0,8,0,0"
+         <CheckBox x:Name="WorkshopUpdateBroadcastCheck" Content="啟用等待玩家離線公告" FontSize="16" Margin="5,8,5,0"
           Checked="WorkshopAutomationOptionChanged" Unchecked="WorkshopAutomationOptionChanged"/>
          <Grid Margin="0,8">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>

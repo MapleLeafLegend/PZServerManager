@@ -37,6 +37,7 @@ public sealed class ServerSettings
     public int MapRemotePlayerVisibility { get; set; } = 1;
     public bool PlayerRespawnWithSelf { get; set; }
     public bool PlayerRespawnWithOther { get; set; }
+    public bool SafehouseAllowRespawn { get; set; }
     public bool Faction { get; set; } = true;
     public int FactionDaySurvivedToCreate { get; set; }
     public int SafehouseDaySurvivedToClaim { get; set; }
@@ -54,6 +55,16 @@ public sealed class ServerSettings
     public int CharacterFreePoints { get; set; }
     public string SpawnItems { get; set; } = "";
     public bool StarterKit { get; set; }
+    public int StatsDecrease { get; set; } = 3;
+    public int EndRegen { get; set; } = 3;
+    public bool Nutrition { get; set; } = true;
+    public int InjurySeverity { get; set; } = 2;
+    public bool BoneFracture { get; set; } = true;
+    public int ClothingDegradation { get; set; } = 3;
+    public bool MultiHitZombies { get; set; }
+    public int RearVulnerability { get; set; } = 3;
+    public int BloodLevel { get; set; } = 3;
+    public bool PlayerDamageFromCrash { get; set; } = true;
     public string WelcomeMessage { get; set; } = "";
     public string WorkshopItems { get; set; } = "";
     public string Mods { get; set; } = "";
