@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer logFlushTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly DispatcherTimer setupActivityTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly ConcurrentQueue<string> pendingLogLines = new();
+    private readonly ConcurrentQueue<(Process Process, string Command)> pendingServerCommands = new();
     private readonly List<ModEntry> resolvedModEntries = new();
     private readonly List<WorkshopDependencyEntry> workshopDependencyEntries = new();
     private readonly List<MapEntry> resolvedMapEntries = new();
@@ -49,6 +50,17 @@ public partial class MainWindow : Window
     private readonly List<string> playerQueryOutput = new();
     private volatile bool capturePlayerQueryOutput;
     private int playerQueryRunning;
+    private TaskCompletionSource<bool>? playerQueryResponseSignal;
+    private CancellationTokenSource? commandWriterCancellation;
+    private CancellationTokenSource automationCancellation = new();
+    private int commandWriterRunning;
+    private int scheduleTickRunning;
+    private int consecutiveCliResponseFailures;
+    private bool cliHealthAlarmActive;
+    private bool automationRuntimeSuspended;
+    private bool suppressAutomationOptionEvents;
+    private bool restartAfterStopAutomated;
+    private volatile bool serverReadyForCommands;
     private bool intentionalStop;
     private bool restartAfterStop;
     private volatile bool roleInitializationFailure;
@@ -1390,6 +1402,7 @@ SandboxVars = {
         currentStartInteractive = interactive;
         intentionalStop = false;
         roleInitializationFailure = false;
+        ResetRuntimeForNewServerProcess();
         var iniPath = Path.Combine(settings.DataDirectory, "Server", settings.ServerName + ".ini");
         var (serverTextEncoding, javaCharset) = DetectServerTextEncoding(iniPath);
         var args = $"/d /s /c \"\"{launcher}\" -servername \"{settings.ServerName}\"";
@@ -1420,17 +1433,13 @@ SandboxVars = {
             StartButton.IsEnabled = false; StopButton.IsEnabled = true;
             SaveWorldButton.IsEnabled = true;
             PlayerQueryMinutesBox.IsEnabled = false;
-            AutoWorkshopUpdateCheck.IsEnabled = false;
-            WorkshopUpdateCheckMinutesBox.IsEnabled = false;
-            WorkshopUpdateBroadcastCheck.IsEnabled = false;
-            WorkshopUpdateAnnouncementMinutesBox.IsEnabled = false;
-            WorkshopUpdateMessageBox.IsEnabled = false;
             SetStatus("執行中", "#4FC18B"); Log($"伺服器已啟動（PID {serverProcess.Id}）。");
-            ScheduleNextRestart();
-            nextPlayerQuery = DateTime.Now.AddMinutes(settings.PlayerQueryMinutes);
-            ScheduleWorkshopUpdateCheck();
+            if (settings.PauseEmpty)
+                Log("Build 42 風險提示：目前 PauseEmpty=true；斷線或快速重連時若發生主迴圈卡死，建議關閉「無玩家時暫停世界」。");
+            nextRestart = null;
+            nextPlayerQuery = null;
+            nextWorkshopUpdateCheck = null;
             UpdateWorkshopAutomationControlState();
-            _ = QueryOnlinePlayersAsync();
         }
         catch (Exception ex)
         {
@@ -1456,8 +1465,22 @@ SandboxVars = {
         if (capturePlayerQueryOutput)
         {
             lock (playerQueryLock) playerQueryOutput.Add(line);
+            if (IsPlayerQueryTerminalLine(line))
+                playerQueryResponseSignal?.TrySetResult(true);
         }
         var normalized = line.Trim();
+        if (!serverReadyForCommands &&
+            normalized.Contains("*** SERVER STARTED ****", StringComparison.OrdinalIgnoreCase))
+        {
+            serverReadyForCommands = true;
+            _ = Dispatcher.InvokeAsync(() =>
+            {
+                Log("PZ 已回報 SERVER STARTED；現在才啟動 CLI 健康檢查與自動化計時，避免載入模組期間誤報。");
+                ScheduleNextRestart();
+                ScheduleWorkshopUpdateCheck();
+                nextPlayerQuery = DateTime.Now;
+            });
+        }
         if (normalized.Contains("Roles.getDefaultForUser()", StringComparison.OrdinalIgnoreCase))
             roleInitializationFailure = true;
         if (!normalized.EndsWith(">PAUSE", StringComparison.OrdinalIgnoreCase) &&
@@ -1492,7 +1515,10 @@ SandboxVars = {
             WorkshopUpdateAnnouncementMinutesBox.IsEnabled = true;
             WorkshopUpdateMessageBox.IsEnabled = true;
             SetStatus("已停止", "#71808A"); nextRestart = null; UpdateNextRestartText();
+            CancelRuntimePipelines();
+            ClearCliHealthState();
             nextPlayerQuery = null;
+            serverReadyForCommands = false;
             nextWorkshopUpdateCheck = null;
             lastKnownOnlinePlayerCount = null;
             OnlinePlayersListBox.ItemsSource = null;
@@ -1521,11 +1547,18 @@ SandboxVars = {
             }
             if (restartAfterStop)
             {
+                var automatedRestart = restartAfterStopAutomated;
                 restartAfterStop = false;
+                restartAfterStopAutomated = false;
                 workshopRestartInProgress = false;
-                Log("5 秒後重新啟動…");
-                await Task.Delay(5000);
-                await StartServerAsync(false);
+                if (automatedRestart && automationRuntimeSuspended)
+                    Log("自動化已暫停，因此取消本次自動重新啟動。");
+                else
+                {
+                    Log("5 秒後重新啟動…");
+                    await Task.Delay(5000);
+                    await StartServerAsync(false);
+                }
             }
             else
             {
@@ -1563,37 +1596,118 @@ SandboxVars = {
         Log("已手動送出存檔指令；伺服器會在背景完成磁碟寫入。");
     }
 
-    private async Task SafeStopAsync(bool restart)
+    private async Task SafeStopAsync(bool restart, bool automated = false,
+        CancellationToken cancellationToken = default)
     {
         if (serverProcess is not { HasExited: false } || !await stopLock.WaitAsync(0)) return;
         try
         {
-            intentionalStop = true; restartAfterStop = restart;
+            intentionalStop = true;
+            restartAfterStop = restart;
+            restartAfterStopAutomated = automated;
+            nextRestart = null;
+            nextWorkshopUpdateAnnouncement = null;
             StopButton.IsEnabled = false; SetStatus(restart ? "正在安全重啟" : "正在安全關服", "#E1A84B");
             SendCommand("servermsg \"伺服器正在存檔，請稍候…\"");
             SendCommand("save");
             Log("已送出 save，等待磁碟寫入…");
-            await Task.Delay(8000);
+            await Task.Delay(8000, cancellationToken);
             if (restart && settings.BackupBeforeRestart) await CreateBackupAsync();
+            cancellationToken.ThrowIfCancellationRequested();
             SendCommand("quit");
             Log("已送出 quit，等待伺服器正常退出…");
             var waitUntil = DateTime.UtcNow.AddSeconds(45);
-            while (serverProcess is { HasExited: false } && DateTime.UtcNow < waitUntil) await Task.Delay(500);
+            while (serverProcess is { HasExited: false } && DateTime.UtcNow < waitUntil)
+                await Task.Delay(500, cancellationToken);
             if (serverProcess is { HasExited: false })
             {
                 restartAfterStop = false;
+                restartAfterStopAutomated = false;
                 Log("45 秒內未退出；為保護存檔，不強制終止程序。");
-                SetStatus("關服逾時", "#D9695F"); StopButton.IsEnabled = true;
+                ActivateCliHealthAlarm("安全關服已等待 45 秒，PZ 仍未退出。");
+                StopButton.IsEnabled = true;
             }
+        }
+        catch (OperationCanceledException) when (automated)
+        {
+            restartAfterStop = false;
+            restartAfterStopAutomated = false;
+            workshopRestartInProgress = false;
+            if (serverProcess is { HasExited: false })
+            {
+                StopButton.IsEnabled = true;
+                SetStatus(cliHealthAlarmActive ? "PZ CLI 無回應／自動化已暫停" : "執行中",
+                    cliHealthAlarmActive ? "#D9695F" : "#4FC18B");
+            }
+            Log("自動關服流程已取消；尚未再送出後續 quit 指令。");
         }
         finally { stopLock.Release(); }
     }
 
     private void SendCommand(string command)
     {
-        if (serverProcess is not { HasExited: false }) return;
-        try { serverProcess.StandardInput.WriteLine(command); serverProcess.StandardInput.Flush(); Log($"> {command}"); }
-        catch (Exception ex) { Log($"指令傳送失敗：{ex.Message}"); }
+        var target = serverProcess;
+        if (target is not { HasExited: false }) return;
+        pendingServerCommands.Enqueue((target, command));
+        StartCommandWriter();
+    }
+
+    private void StartCommandWriter()
+    {
+        if (Interlocked.CompareExchange(ref commandWriterRunning, 1, 0) != 0) return;
+        _ = DrainServerCommandQueueAsync();
+    }
+
+    private async Task DrainServerCommandQueueAsync()
+    {
+        try
+        {
+            while (pendingServerCommands.TryDequeue(out var item))
+            {
+                var cancellation = commandWriterCancellation;
+                if (cancellation == null || cancellation.IsCancellationRequested ||
+                    !ReferenceEquals(serverProcess, item.Process) || item.Process.HasExited)
+                    continue;
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+                timeout.CancelAfter(TimeSpan.FromSeconds(3));
+                try
+                {
+                    await item.Process.StandardInput.WriteLineAsync(
+                        item.Command.AsMemory(), timeout.Token).ConfigureAwait(false);
+                    await item.Process.StandardInput.FlushAsync(timeout.Token).ConfigureAwait(false);
+                    Log($"> {item.Command}");
+                }
+                catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+                {
+                    ClearPendingServerCommands();
+                    Log("PZ 標準輸入管線 3 秒內未接受指令；GUI 未被阻塞，已觸發 CLI 健康警報。");
+                    await Dispatcher.InvokeAsync(() =>
+                        ActivateCliHealthAlarm("PZ 標準輸入管線已阻塞，指令無法送入。"));
+                    break;
+                }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Log($"指令傳送失敗：{ex.Message}");
+                    if (ReferenceEquals(serverProcess, item.Process) && !item.Process.HasExited)
+                        await Dispatcher.InvokeAsync(() =>
+                            RegisterCliHealthFailure("PZ 指令管線發生錯誤。"));
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref commandWriterRunning, 0);
+            if (!pendingServerCommands.IsEmpty) StartCommandWriter();
+        }
+    }
+
+    private void ClearPendingServerCommands()
+    {
+        while (pendingServerCommands.TryDequeue(out _)) { }
     }
 
     private static (Encoding StreamEncoding, string JavaCharset) DetectServerTextEncoding(string iniPath)
@@ -1616,7 +1730,178 @@ SandboxVars = {
         var command = CommandBox.Text.Trim();
         if (command.Length == 0) return;
         if (serverProcess is not { HasExited: false }) { MessageBox.Show("伺服器尚未啟動。"); return; }
+        if (command.Equals("quit", StringComparison.OrdinalIgnoreCase))
+            CancelCurrentSessionAutomationForManualQuit();
         SendCommand(command); CommandBox.Clear();
+    }
+
+    private void ResetRuntimeForNewServerProcess()
+    {
+        commandWriterCancellation?.Cancel();
+        commandWriterCancellation?.Dispose();
+        commandWriterCancellation = new CancellationTokenSource();
+        ClearPendingServerCommands();
+        RenewAutomationCancellation();
+        consecutiveCliResponseFailures = 0;
+        cliHealthAlarmActive = false;
+        automationRuntimeSuspended = false;
+        restartAfterStopAutomated = false;
+        serverReadyForCommands = false;
+        CliHealthBanner.Visibility = Visibility.Collapsed;
+        ForceTerminateFrozenServerButton.IsEnabled = false;
+    }
+
+    private void RenewAutomationCancellation()
+    {
+        automationCancellation.Cancel();
+        automationCancellation.Dispose();
+        automationCancellation = new CancellationTokenSource();
+    }
+
+    private void CancelRuntimePipelines()
+    {
+        automationCancellation.Cancel();
+        commandWriterCancellation?.Cancel();
+        ClearPendingServerCommands();
+        playerQueryResponseSignal?.TrySetCanceled();
+    }
+
+    private void ClearCliHealthState()
+    {
+        consecutiveCliResponseFailures = 0;
+        cliHealthAlarmActive = false;
+        automationRuntimeSuspended = false;
+        CliHealthBanner.Visibility = Visibility.Collapsed;
+        ForceTerminateFrozenServerButton.IsEnabled = false;
+    }
+
+    private static bool IsPlayerQueryTerminalLine(string line) =>
+        Regex.IsMatch(line, @"(?i)players?\s+connected\s*\(\d+\)") ||
+        Regex.IsMatch(line, @"(?i)no\s+players?\s+(?:are\s+)?connected");
+
+    private void RegisterCliHealthFailure(string reason)
+    {
+        if (serverProcess is not { HasExited: false }) return;
+        consecutiveCliResponseFailures++;
+        if (consecutiveCliResponseFailures >= 2)
+        {
+            ActivateCliHealthAlarm(reason);
+            return;
+        }
+
+        CliHealthBanner.Visibility = Visibility.Visible;
+        CliHealthBanner.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4B3B1E"));
+        CliHealthBanner.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E1A84B"));
+        LocalizationService.SetFormattedText(CliHealthText,
+            "PZ CLI 第一次未回應：{0} 30 秒後重試；目前尚未判定卡死。",
+            LocalizationService.Translate(reason));
+        ForceTerminateFrozenServerButton.IsEnabled = false;
+        nextPlayerQuery = DateTime.Now.AddSeconds(30);
+        Log("CLI 健康檢查第一次逾時；30 秒後重試。LOG 持續輸出不代表 PZ 主迴圈仍正常。");
+    }
+
+    private void ActivateCliHealthAlarm(string reason)
+    {
+        if (serverProcess is not { HasExited: false }) return;
+        var firstActivation = !cliHealthAlarmActive;
+        consecutiveCliResponseFailures = Math.Max(2, consecutiveCliResponseFailures);
+        cliHealthAlarmActive = true;
+        automationRuntimeSuspended = true;
+        automationCancellation.Cancel();
+        nextRestart = null;
+        nextWorkshopUpdateCheck = null;
+        nextWorkshopUpdateAnnouncement = null;
+        nextPlayerQuery = DateTime.Now.AddSeconds(30);
+        workshopRestartInProgress = false;
+        if (restartAfterStopAutomated)
+        {
+            restartAfterStop = false;
+            restartAfterStopAutomated = false;
+        }
+        UpdateNextRestartText();
+        CliHealthBanner.Visibility = Visibility.Visible;
+        CliHealthBanner.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#482724"));
+        CliHealthBanner.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D9695F"));
+        LocalizationService.SetFormattedText(CliHealthText,
+            "PZ CLI 無回應：{0} 已暫停全部自動化。請先測試回應；必要時才手動強制終止。",
+            LocalizationService.Translate(reason));
+        ForceTerminateFrozenServerButton.IsEnabled = true;
+        SetStatus("PZ CLI 無回應／自動化已暫停", "#D9695F");
+        if (firstActivation)
+            Log("警報：連續兩次 `players` 沒有實際回傳，已暫停定時重啟、Workshop 檢查與公告。管理器不會自行強制關閉程序。");
+    }
+
+    private void RegisterCliHealthSuccess()
+    {
+        var wasAbnormal = consecutiveCliResponseFailures > 0 || cliHealthAlarmActive;
+        consecutiveCliResponseFailures = 0;
+        if (cliHealthAlarmActive || automationRuntimeSuspended)
+        {
+            cliHealthAlarmActive = false;
+            automationRuntimeSuspended = false;
+            RenewAutomationCancellation();
+            ScheduleNextRestart();
+            ScheduleWorkshopUpdateCheck();
+            SetStatus("執行中", "#4FC18B");
+        }
+        CliHealthBanner.Visibility = Visibility.Collapsed;
+        ForceTerminateFrozenServerButton.IsEnabled = false;
+        if (wasAbnormal) Log("PZ CLI 已重新回傳 `players` 結果；健康警報解除並恢復已啟用的自動化。");
+    }
+
+    private void CancelCurrentSessionAutomationForManualQuit()
+    {
+        intentionalStop = true;
+        restartAfterStop = false;
+        restartAfterStopAutomated = false;
+        workshopRestartInProgress = false;
+        automationCancellation.Cancel();
+        nextRestart = null;
+        nextWorkshopUpdateCheck = null;
+        nextWorkshopUpdateAnnouncement = null;
+        pendingWorkshopUpdateIds.Clear();
+        UpdateNextRestartText();
+        UpdateWorkshopUpdateStatus();
+        Log("偵測到手動 quit：已取消本次工作階段的重啟倒數與模組更新自動化，不會在退出後自行重開。 ");
+    }
+
+    private async void TestCliResponse_Click(object sender, RoutedEventArgs e)
+    {
+        await QueryOnlinePlayersAsync();
+    }
+
+    private async void ForceTerminateFrozenServer_Click(object sender, RoutedEventArgs e)
+    {
+        var target = serverProcess;
+        if (!cliHealthAlarmActive || target is not { HasExited: false }) return;
+        var answer = MessageBox.Show(
+            LocalizationService.Translate(
+                "這只會終止目前由管理器啟動的 PZ 程序樹，不會關閉 Windows VM。\n\n" +
+                "PZ CLI 已無法執行 save／quit；強制終止可能遺失最近一次成功存檔後的進度。確定繼續嗎？"),
+            LocalizationService.Translate("強制終止卡死的 PZ 程序"),
+            MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+
+        intentionalStop = true;
+        restartAfterStop = false;
+        restartAfterStopAutomated = false;
+        ForceTerminateFrozenServerButton.IsEnabled = false;
+        SetStatus("正在強制終止卡死程序", "#D9695F");
+        CancelRuntimePipelines();
+        Log($"使用者已確認強制終止卡死的 PZ 程序樹（PID {target.Id}）。");
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (!target.HasExited) target.Kill(entireProcessTree: true);
+                target.WaitForExit(15000);
+            });
+        }
+        catch (Exception ex)
+        {
+            Log($"強制終止失敗：{ex.Message}");
+            if (target is { HasExited: false }) ForceTerminateFrozenServerButton.IsEnabled = true;
+        }
     }
 
     private async void Backup_Click(object sender, RoutedEventArgs e) => await CreateBackupAsync(true);
@@ -3538,7 +3823,8 @@ SandboxVars = {
 
     private void ScheduleNextRestart()
     {
-        nextRestart = settings.AutoRestart && serverProcess is { HasExited: false }
+        nextRestart = settings.AutoRestart && !automationRuntimeSuspended &&
+            serverProcess is { HasExited: false }
             ? DateTime.Now.AddHours(settings.RestartHours) : null;
         UpdateNextRestartText();
     }
@@ -3551,7 +3837,7 @@ SandboxVars = {
             UpdateWorkshopUpdateStatus();
             return;
         }
-        if (!settings.AutoWorkshopUpdate)
+        if (!settings.AutoWorkshopUpdate || automationRuntimeSuspended)
         {
             nextWorkshopUpdateCheck = null;
             pendingWorkshopUpdateIds.Clear();
@@ -3566,8 +3852,46 @@ SandboxVars = {
         UpdateWorkshopUpdateStatus();
     }
 
-    private void WorkshopAutomationOptionChanged(object sender, RoutedEventArgs e) =>
+    private void AutomationOptionChanged(object sender, RoutedEventArgs e)
+    {
+        if (suppressAutomationOptionEvents) return;
+        var checkEnabled = AutoWorkshopUpdateCheck?.IsChecked == true;
+        if (!checkEnabled && WorkshopUpdateBroadcastCheck?.IsChecked == true)
+        {
+            suppressAutomationOptionEvents = true;
+            WorkshopUpdateBroadcastCheck.IsChecked = false;
+            suppressAutomationOptionEvents = false;
+        }
         UpdateWorkshopAutomationControlState();
+        if (!uiInitialized) return;
+
+        settings.AutoRestart = AutoRestartCheck.IsChecked == true;
+        settings.AutoWorkshopUpdate = checkEnabled;
+        settings.WorkshopUpdateBroadcast = checkEnabled &&
+            WorkshopUpdateBroadcastCheck?.IsChecked == true;
+        PersistSettings();
+
+        if (serverProcess is { HasExited: false })
+        {
+            RenewAutomationCancellation();
+            if (restartAfterStopAutomated)
+            {
+                restartAfterStop = false;
+                restartAfterStopAutomated = false;
+            }
+            workshopRestartInProgress = false;
+            if (!settings.AutoWorkshopUpdate)
+            {
+                pendingWorkshopUpdateIds.Clear();
+                nextWorkshopUpdateAnnouncement = null;
+            }
+            ScheduleNextRestart();
+            ScheduleWorkshopUpdateCheck();
+            Log($"自動化已即時更新：定時重啟={(settings.AutoRestart ? "開" : "關")}、" +
+                $"模組檢查={(settings.AutoWorkshopUpdate ? "開" : "關")}、" +
+                $"玩家公告={(settings.WorkshopUpdateBroadcast ? "開" : "關")}。");
+        }
+    }
 
     private void UpdateWorkshopAutomationControlState()
     {
@@ -3580,14 +3904,42 @@ SandboxVars = {
         var serverRunning = serverProcess is { HasExited: false };
         var checkEnabled = AutoWorkshopUpdateCheck.IsChecked == true;
         var broadcastEnabled = checkEnabled && WorkshopUpdateBroadcastCheck.IsChecked == true;
-        AutoWorkshopUpdateCheck.IsEnabled = !serverRunning;
+        AutoWorkshopUpdateCheck.IsEnabled = true;
         WorkshopUpdateCheckMinutesBox.IsEnabled = !serverRunning && checkEnabled;
-        WorkshopUpdateBroadcastCheck.IsEnabled = !serverRunning && checkEnabled;
+        WorkshopUpdateBroadcastCheck.IsEnabled = checkEnabled;
         WorkshopUpdateAnnouncementMinutesBox.IsEnabled = !serverRunning && broadcastEnabled;
         WorkshopUpdateMessageBox.IsEnabled = !serverRunning && broadcastEnabled;
     }
 
-    private async Task CheckWorkshopUpdatesAsync()
+    private void DisableAllAutomation_Click(object sender, RoutedEventArgs e)
+    {
+        suppressAutomationOptionEvents = true;
+        AutoRestartCheck.IsChecked = false;
+        AutoWorkshopUpdateCheck.IsChecked = false;
+        WorkshopUpdateBroadcastCheck.IsChecked = false;
+        suppressAutomationOptionEvents = false;
+        settings.AutoRestart = false;
+        settings.AutoWorkshopUpdate = false;
+        settings.WorkshopUpdateBroadcast = false;
+        automationCancellation.Cancel();
+        if (restartAfterStopAutomated)
+        {
+            restartAfterStop = false;
+            restartAfterStopAutomated = false;
+        }
+        workshopRestartInProgress = false;
+        nextRestart = null;
+        nextWorkshopUpdateCheck = null;
+        nextWorkshopUpdateAnnouncement = null;
+        pendingWorkshopUpdateIds.Clear();
+        UpdateWorkshopAutomationControlState();
+        UpdateNextRestartText();
+        UpdateWorkshopUpdateStatus();
+        PersistSettings();
+        Log("使用者已立即停用全部自動化；目前 PZ 程序不會被自動重啟或因模組更新而關服。");
+    }
+
+    private async Task CheckWorkshopUpdatesAsync(CancellationToken cancellationToken)
     {
         if (serverProcess is not { HasExited: false } ||
             !settings.AutoWorkshopUpdate ||
@@ -3595,6 +3947,7 @@ SandboxVars = {
             return;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var ids = NormalizeWorkshopList(settings.WorkshopItems)
                 .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Where(id => ulong.TryParse(id, out _))
@@ -3619,7 +3972,7 @@ SandboxVars = {
                 return;
             }
 
-            var remote = await FetchPublishedWorkshopUpdateTimesAsync(ids);
+            var remote = await FetchPublishedWorkshopUpdateTimesAsync(ids, cancellationToken);
             var outdated = ids.Where(id =>
                     installed.TryGetValue(id, out var localTime) &&
                     remote.TryGetValue(id, out var remoteTime) &&
@@ -3650,7 +4003,11 @@ SandboxVars = {
                     settings.WorkshopUpdateBroadcast ? DateTime.Now : null;
                 Log($"偵測到 {pendingWorkshopUpdateIds.Count} 個 Workshop 更新：{string.Join(", ", pendingWorkshopUpdateIds)}");
             }
-            await EvaluatePendingWorkshopUpdatesAsync();
+            await EvaluatePendingWorkshopUpdatesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Log("Workshop 更新自動化已取消。");
         }
         catch (Exception ex)
         {
@@ -3659,7 +4016,7 @@ SandboxVars = {
                 "模組更新：檢查失敗，將於 {0} 重試",
                 nextWorkshopUpdateCheck?.ToString("HH:mm") ?? "—");
             if (pendingWorkshopUpdateIds.Count > 0)
-                await EvaluatePendingWorkshopUpdatesAsync();
+                await EvaluatePendingWorkshopUpdatesAsync(cancellationToken);
         }
         finally
         {
@@ -3667,14 +4024,15 @@ SandboxVars = {
         }
     }
 
-    private async Task EvaluatePendingWorkshopUpdatesAsync()
+    private async Task EvaluatePendingWorkshopUpdatesAsync(CancellationToken cancellationToken)
     {
         if (pendingWorkshopUpdateIds.Count == 0 ||
             serverProcess is not { HasExited: false } ||
             workshopRestartInProgress)
             return;
 
-        var onlinePlayers = await QueryOnlinePlayersAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        var onlinePlayers = await QueryOnlinePlayersCoreAsync(cancellationToken, true);
         if (onlinePlayers is null)
         {
             if (settings.WorkshopUpdateBroadcast)
@@ -3695,7 +4053,7 @@ SandboxVars = {
                 "模組更新：偵測到 {0} 個更新，正在安全重啟",
                 pendingWorkshopUpdateIds.Count);
             Log("模組有更新且已確認目前無玩家；開始安全存檔、關服與重啟。");
-            await SafeStopAsync(true);
+            await SafeStopAsync(true, true, cancellationToken);
             if (serverProcess is { HasExited: false } && !restartAfterStop)
             {
                 workshopRestartInProgress = false;
@@ -3787,13 +4145,14 @@ SandboxVars = {
     }
 
     private async Task<Dictionary<string, long>> FetchPublishedWorkshopUpdateTimesAsync(
-        IReadOnlyList<string> ids)
+        IReadOnlyList<string> ids, CancellationToken cancellationToken)
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("PZServerManager/" + AppVersion);
         var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         foreach (var batch in ids.Chunk(100))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var values = new List<KeyValuePair<string, string>>
             {
                 new("itemcount", batch.Length.ToString(CultureInfo.InvariantCulture))
@@ -3802,9 +4161,9 @@ SandboxVars = {
                 values.Add(new($"publishedfileids[{index}]", batch[index]));
             using var response = await client.PostAsync(
                 "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
-                new FormUrlEncodedContent(values));
+                new FormUrlEncodedContent(values), cancellationToken);
             response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
             foreach (var pair in ParsePublishedWorkshopUpdateTimes(json))
                 result[pair.Key] = pair.Value;
         }
@@ -3852,6 +4211,12 @@ SandboxVars = {
                 "模組更新：伺服器未啟動");
             return;
         }
+        if (automationRuntimeSuspended)
+        {
+            LocalizationService.SetText(WorkshopUpdateStatusText,
+                "模組更新：PZ CLI 無回應，自動化已暫停");
+            return;
+        }
         if (!settings.AutoWorkshopUpdate)
         {
             LocalizationService.SetText(WorkshopUpdateStatusText,
@@ -3873,70 +4238,122 @@ SandboxVars = {
 
     private async void ScheduleTimer_Tick(object? sender, EventArgs e)
     {
-        UpdateNextRestartText();
-        if (serverProcess is not { HasExited: false }) return;
-        if (settings.AutoWorkshopUpdate &&
-            nextWorkshopUpdateCheck is not null &&
-            DateTime.Now >= nextWorkshopUpdateCheck.Value)
+        if (Interlocked.Exchange(ref scheduleTickRunning, 1) != 0) return;
+        try
         {
-            nextWorkshopUpdateCheck = DateTime.Now.AddMinutes(
-                settings.WorkshopUpdateCheckMinutes);
-            await CheckWorkshopUpdatesAsync();
+            UpdateNextRestartText();
+            if (serverProcess is not { HasExited: false }) return;
+            if (!serverReadyForCommands) return;
+            var automationToken = automationCancellation.Token;
+            if (!automationRuntimeSuspended && settings.AutoWorkshopUpdate &&
+                nextWorkshopUpdateCheck is not null &&
+                DateTime.Now >= nextWorkshopUpdateCheck.Value)
+            {
+                nextWorkshopUpdateCheck = DateTime.Now.AddMinutes(
+                    settings.WorkshopUpdateCheckMinutes);
+                await CheckWorkshopUpdatesAsync(automationToken);
+            }
+            if (!automationRuntimeSuspended && settings.AutoWorkshopUpdate &&
+                settings.WorkshopUpdateBroadcast &&
+                pendingWorkshopUpdateIds.Count > 0 &&
+                nextWorkshopUpdateAnnouncement is not null &&
+                DateTime.Now >= nextWorkshopUpdateAnnouncement.Value)
+            {
+                await EvaluatePendingWorkshopUpdatesAsync(automationToken);
+            }
+            if (nextPlayerQuery is not null && DateTime.Now >= nextPlayerQuery.Value)
+            {
+                nextPlayerQuery = DateTime.Now.AddMinutes(settings.PlayerQueryMinutes);
+                await QueryOnlinePlayersAsync();
+            }
+            if (automationRuntimeSuspended || nextRestart is null) return;
+            var remaining = nextRestart.Value - DateTime.Now;
+            if (remaining <= TimeSpan.Zero)
+            {
+                nextRestart = null;
+                await SafeStopAsync(true, true, automationToken);
+            }
+            else
+            {
+                var minutes = (int)Math.Ceiling(remaining.TotalMinutes);
+                if (minutes <= settings.WarningMinutes && minutes > 0 && Math.Abs(remaining.TotalSeconds % 60) < 16)
+                    SendCommand($"servermsg \"{FormatRestartMessage(minutes)}\"");
+            }
         }
-        if (settings.AutoWorkshopUpdate &&
-            settings.WorkshopUpdateBroadcast &&
-            pendingWorkshopUpdateIds.Count > 0 &&
-            nextWorkshopUpdateAnnouncement is not null &&
-            DateTime.Now >= nextWorkshopUpdateAnnouncement.Value)
+        catch (OperationCanceledException)
         {
-            await EvaluatePendingWorkshopUpdatesAsync();
+            Log("自動化排程已取消。");
         }
-        if (nextPlayerQuery is not null && DateTime.Now >= nextPlayerQuery.Value)
+        catch (Exception ex)
         {
-            nextPlayerQuery = DateTime.Now.AddMinutes(settings.PlayerQueryMinutes);
-            await QueryOnlinePlayersAsync();
+            Log($"自動化排程發生錯誤但 GUI 已繼續運作：{ex.Message}");
         }
-        if (nextRestart is null) return;
-        var remaining = nextRestart.Value - DateTime.Now;
-        if (remaining <= TimeSpan.Zero)
+        finally
         {
-            nextRestart = null;
-            await SafeStopAsync(true);
-        }
-        else
-        {
-            var minutes = (int)Math.Ceiling(remaining.TotalMinutes);
-            if (minutes <= settings.WarningMinutes && minutes > 0 && Math.Abs(remaining.TotalSeconds % 60) < 16)
-                SendCommand($"servermsg \"{FormatRestartMessage(minutes)}\"");
+            Interlocked.Exchange(ref scheduleTickRunning, 0);
         }
     }
 
     private async void RefreshPlayers_Click(object sender, RoutedEventArgs e) =>
         await QueryOnlinePlayersAsync();
 
-    private async Task<int?> QueryOnlinePlayersAsync()
+    private Task<int?> QueryOnlinePlayersAsync() =>
+        QueryOnlinePlayersCoreAsync(CancellationToken.None, true);
+
+    private async Task<int?> QueryOnlinePlayersCoreAsync(
+        CancellationToken cancellationToken, bool trackHealth)
     {
         var queriedProcess = serverProcess;
         if (queriedProcess is not { HasExited: false } || Interlocked.Exchange(ref playerQueryRunning, 1) != 0)
             return null;
+        if (!serverReadyForCommands)
+        {
+            Interlocked.Exchange(ref playerQueryRunning, 0);
+            Log("PZ 尚未回報 SERVER STARTED；暫不送出 players，以免在模組／世界載入期間誤判卡死。");
+            return null;
+        }
         try
         {
             lock (playerQueryLock) playerQueryOutput.Clear();
+            playerQueryResponseSignal = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
             capturePlayerQueryOutput = true;
             SendCommand("players");
-            await Task.Delay(2500);
+            try
+            {
+                await playerQueryResponseSignal.Task.WaitAsync(
+                    TimeSpan.FromSeconds(10), cancellationToken);
+                await Task.Delay(600, cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                if (trackHealth) RegisterCliHealthFailure(
+                    "`players` 已送出，但 10 秒內沒有回傳玩家人數。");
+                return null;
+            }
             capturePlayerQueryOutput = false;
             if (!ReferenceEquals(serverProcess, queriedProcess) || queriedProcess.HasExited)
                 return null;
             string response;
             lock (playerQueryLock) response = string.Join(Environment.NewLine, playerQueryOutput);
             var count = ApplyOnlinePlayerResponse(response, "伺服器控制台");
+            if (count is null)
+            {
+                if (trackHealth) RegisterCliHealthFailure("`players` 回傳內容不完整，無法確認玩家人數。");
+                return null;
+            }
+            if (trackHealth) RegisterCliHealthSuccess();
             nextPlayerQuery = DateTime.Now.AddMinutes(settings.PlayerQueryMinutes);
             return count;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
         }
         finally
         {
             capturePlayerQueryOutput = false;
+            playerQueryResponseSignal = null;
             Interlocked.Exchange(ref playerQueryRunning, 0);
         }
     }
