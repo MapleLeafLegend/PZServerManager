@@ -16,7 +16,7 @@
       <StackPanel Orientation="Horizontal">
        <TextBlock Text="BUILD 42 伺服器管理器" FontWeight="SemiBold" FontSize="25"/>
        <Border Background="#8A641F" CornerRadius="3" Padding="7,2" Margin="10,5,0,3">
-       <TextBlock x:Name="HeaderVersionText" Text="v1.9.5" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
+       <TextBlock x:Name="HeaderVersionText" Text="v1.9.6" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
        </Border>
       </StackPanel>
      </StackPanel>
@@ -31,7 +31,7 @@
   </Border>
   <TabControl x:Name="MainTabs" Grid.Row="1" Margin="14" Background="#182026" BorderBrush="#354650" Foreground="White">
    <TabItem Header=" 儀表板 ">
-    <Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <WrapPanel>
       <Button x:Name="InstallButton" Content="安裝 / 更新伺服器" Click="Install_Click"/>
       <Button Content="寫入基礎設定" Click="SaveConfig_Click"/>
@@ -53,7 +53,19 @@
       </StackPanel>
      </Border>
      </WrapPanel>
-     <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="260"/></Grid.ColumnDefinitions>
+      <Border x:Name="CliHealthBanner" Grid.Row="1" Visibility="Collapsed" Background="#482724"
+       BorderBrush="#D9695F" BorderThickness="1" CornerRadius="6" Padding="10" Margin="4,6">
+       <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBlock x:Name="CliHealthText" Text="PZ CLI 回應異常" Foreground="#FFD5D0"
+         FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center"/>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+         <Button Content="立即測試回應" Click="TestCliResponse_Click"/>
+         <Button x:Name="ForceTerminateFrozenServerButton" Content="強制終止卡死程序" Background="#8A3D38"
+          Click="ForceTerminateFrozenServer_Click" IsEnabled="False"/>
+        </StackPanel>
+       </Grid>
+      </Border>
+      <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="260"/></Grid.ColumnDefinitions>
       <GroupBox Header="即時主控台">
        <TextBox x:Name="ConsoleBox" IsReadOnly="True" FontFamily="Consolas" FontSize="13"
         TextWrapping="NoWrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
@@ -66,7 +78,7 @@
        </Grid>
       </GroupBox>
      </Grid>
-     <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <TextBox x:Name="CommandBox" ToolTip="輸入伺服器指令，例如 players、servermsg 訊息" KeyDown="CommandBox_KeyDown"/>
       <Button Grid.Column="1" Content="送出指令" Click="SendCommand_Click"/>
      </Grid>
@@ -128,7 +140,8 @@
       <GroupBox Header="存取方式"><StackPanel>
        <CheckBox x:Name="PublicCheck" Content="列在公開伺服器清單"/>
        <CheckBox x:Name="OpenCheck" Content="允許新玩家直接加入"/>
-       <CheckBox x:Name="PauseCheck" Content="無玩家時暫停世界"/>
+        <CheckBox x:Name="PauseCheck" Content="無玩家時暫停世界（Build 42 斷線／快速重連環境不建議）"
+         ToolTip="PauseEmpty=true 曾在 Build 42 斷線／快速重連情境伴隨主迴圈卡死；管理器只提示，不會擅自改寫官方預設。"/>
       </StackPanel></GroupBox>
       <Button Content="儲存管理器設定並寫入伺服器 INI" Background="#8A641F" HorizontalAlignment="Right" Click="SaveConfig_Click"/>
      </StackPanel>
@@ -509,7 +522,8 @@
        <Border Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="8" Padding="20">
         <StackPanel>
          <TextBlock Text="定時安全重啟" FontSize="23" FontWeight="SemiBold" Margin="0,0,0,12"/>
-         <CheckBox x:Name="AutoRestartCheck" Content="啟用定時重啟" FontSize="16"/>
+          <CheckBox x:Name="AutoRestartCheck" Content="啟用定時重啟" FontSize="16"
+           Checked="AutomationOptionChanged" Unchecked="AutomationOptionChanged"/>
          <Grid Margin="0,8">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
           <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
@@ -529,16 +543,16 @@
        <Border Grid.Column="2" Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="8" Padding="20">
         <StackPanel>
          <TextBlock Text="Workshop 模組更新" FontSize="23" FontWeight="SemiBold" Margin="0,0,0,12"/>
-         <CheckBox x:Name="AutoWorkshopUpdateCheck" Content="啟用模組更新檢查" FontSize="16"
-          Checked="WorkshopAutomationOptionChanged" Unchecked="WorkshopAutomationOptionChanged"/>
+          <CheckBox x:Name="AutoWorkshopUpdateCheck" Content="啟用模組更新檢查" FontSize="16"
+           Checked="AutomationOptionChanged" Unchecked="AutomationOptionChanged"/>
          <Grid Margin="0,8">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
           <Label Content="模組更新檢查間隔（分鐘）"/>
           <TextBox x:Name="WorkshopUpdateCheckMinutesBox" Grid.Column="1"
            ToolTip="允許 1–1440 分鐘；預設 5 分鐘"/>
          </Grid>
-         <CheckBox x:Name="WorkshopUpdateBroadcastCheck" Content="啟用等待玩家離線公告" FontSize="16" Margin="5,8,5,0"
-          Checked="WorkshopAutomationOptionChanged" Unchecked="WorkshopAutomationOptionChanged"/>
+          <CheckBox x:Name="WorkshopUpdateBroadcastCheck" Content="啟用等待玩家離線公告" FontSize="16" Margin="5,8,5,0"
+           Checked="AutomationOptionChanged" Unchecked="AutomationOptionChanged"/>
          <Grid Margin="0,8">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
           <Label Content="有玩家時公告間隔（分鐘）"/>
@@ -557,6 +571,7 @@
      </ScrollViewer>
      <Border Grid.Row="1" BorderBrush="#354650" BorderThickness="0,1,0,0" Padding="6,12,6,0">
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+       <Button Content="立即停止全部自動化" Background="#8A3D38" Click="DisableAllAutomation_Click"/>
        <Button Content="儲存自動化設定" Click="SaveSchedule_Click"/>
        <Button Content="測試安全重啟" Background="#8A641F" Click="RestartNow_Click"/>
       </StackPanel>
