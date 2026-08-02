@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Diagnostics;
 using PZServerManager;
 
 internal static class Program
@@ -324,6 +325,52 @@ internal static class Program
                 workshopAutomationPosition.Y + workshopAutomationControl.ActualHeight <=
                     window.ActualHeight,
                 "Workshop automation controls are outside the default visible window.");
+            Assert(((FrameworkElement)Control("CliHealthBanner")).Visibility == Visibility.Collapsed,
+                "CLI health banner must be hidden before a failure is detected.");
+            Assert((bool)Invoke("IsPlayerQueryTerminalLine", "Players connected (2):")! &&
+                (bool)Invoke("IsPlayerQueryTerminalLine", "No players are connected")!,
+                "The CLI watchdog does not recognize official players responses.");
+
+            using (var watchdogProcess = Process.Start(new ProcessStartInfo("cmd.exe",
+                       "/d /c ping -n 8 127.0.0.1 >nul")
+                   { UseShellExecute = false, CreateNoWindow = true })!)
+            {
+                Field("serverProcess").SetValue(window, watchdogProcess);
+                Invoke("UpdateWorkshopAutomationControlState");
+                Assert(((CheckBox)Control("AutoWorkshopUpdateCheck")).IsEnabled &&
+                    ((CheckBox)Control("WorkshopUpdateBroadcastCheck")).IsEnabled,
+                    "Running server must not lock the emergency automation switches.");
+                Assert(!((TextBox)Control("WorkshopUpdateCheckMinutesBox")).IsEnabled,
+                    "Running server must keep automation timing fields locked.");
+                Invoke("RegisterCliHealthFailure", "watchdog test 1");
+                Assert(((FrameworkElement)Control("CliHealthBanner")).Visibility == Visibility.Visible &&
+                    !((Button)Control("ForceTerminateFrozenServerButton")).IsEnabled,
+                    "First CLI timeout must warn without enabling force termination.");
+                Invoke("RegisterCliHealthFailure", "watchdog test 2");
+                Assert((bool)Field("cliHealthAlarmActive").GetValue(window)! &&
+                    (bool)Field("automationRuntimeSuspended").GetValue(window)! &&
+                    ((Button)Control("ForceTerminateFrozenServerButton")).IsEnabled,
+                    "Second CLI timeout must suspend automation and expose manual recovery.");
+                Invoke("RegisterCliHealthSuccess");
+                Assert(!(bool)Field("cliHealthAlarmActive").GetValue(window)! &&
+                    !(bool)Field("automationRuntimeSuspended").GetValue(window)! &&
+                    ((FrameworkElement)Control("CliHealthBanner")).Visibility == Visibility.Collapsed,
+                    "A verified players response must clear the CLI health alarm.");
+                Invoke("DisableAllAutomation_Click", new object(), new RoutedEventArgs());
+                var runtimeSettings = Field("settings").GetValue(window)!;
+                Assert(!((CheckBox)Control("AutoRestartCheck")).IsChecked!.Value &&
+                    !((CheckBox)Control("AutoWorkshopUpdateCheck")).IsChecked!.Value &&
+                    !(bool)runtimeSettings.GetType().GetProperty("AutoRestart")!.GetValue(runtimeSettings)! &&
+                    !(bool)runtimeSettings.GetType().GetProperty("AutoWorkshopUpdate")!.GetValue(runtimeSettings)!,
+                    "Emergency stop-all did not disable both automation paths immediately.");
+                Checked("AutoRestartCheck", true);
+                Checked("AutoWorkshopUpdateCheck", true);
+                Checked("WorkshopUpdateBroadcastCheck", true);
+                if (!watchdogProcess.HasExited) watchdogProcess.Kill(true);
+                watchdogProcess.WaitForExit(3000);
+                Field("serverProcess").SetValue(window, null);
+                Invoke("UpdateWorkshopAutomationControlState");
+            }
             Field("uiInitialized").SetValue(window, false);
             try
             {
@@ -458,7 +505,7 @@ internal static class Program
                 ?? throw new MissingFieldException("CreatorText")).GetValue(about)!;
             var disclaimer = (TextBlock)(aboutType.GetField("DisclaimerText", Flags)
                 ?? throw new MissingFieldException("DisclaimerText")).GetValue(about)!;
-            Assert(aboutVersion.Text == "版本 v1.9.5",
+            Assert(aboutVersion.Text == "版本 v1.9.6",
                 $"About version is incorrect: {aboutVersion.Text}");
             Assert(creator.Text == "MapleLeaf", "About creator is incorrect.");
             var disclaimerText = new System.Windows.Documents.TextRange(
