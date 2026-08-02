@@ -17,6 +17,7 @@ package-final/
 smoke-all/data/
 smoke-all/install/
 local-mod-test/
+FIXZONE/
 
 # User/server state and secrets
 manager-settings.json
