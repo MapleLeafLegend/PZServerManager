@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using System.Reflection;
 using System.Net.Http;
@@ -30,11 +31,23 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer setupActivityTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly ConcurrentQueue<string> pendingLogLines = new();
     private readonly ConcurrentQueue<(Process Process, string Command)> pendingServerCommands = new();
+    private readonly List<string> managedWorkshopIds = new();
     private readonly List<ModEntry> resolvedModEntries = new();
     private readonly List<WorkshopDependencyEntry> workshopDependencyEntries = new();
     private readonly List<MapEntry> resolvedMapEntries = new();
     private readonly Dictionary<string, string> workshopTitles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<string>> workshopRequirements = new(StringComparer.OrdinalIgnoreCase);
+    private readonly WorkshopMetadataCache workshopMetadataCache = WorkshopMetadataCache.Load();
+    private readonly List<ConfigValueRow> inspectedRows = new();
+    private readonly List<ConfigValueRow> featuredIniRows = new();
+    private readonly List<ConfigValueRow> featuredSandboxRows = new();
+    private readonly List<string> managerLogViewerLines = new();
+    private Task<GitHubReleaseInfo?> updateCheckTask = Task.FromResult<GitHubReleaseInfo?>(null);
+    private bool pauseConsoleScroll;
+    private bool configDirty;
+    private bool modModelHasPendingRepair;
+    private bool suppressDirtyTracking;
+    private string lastScheduleResult = "尚無紀錄";
     private string resolvedWorkshopIdentity = "";
     private ServerSettings settings = new();
     private Process? serverProcess;
@@ -42,6 +55,7 @@ public partial class MainWindow : Window
     private DateTime? nextPlayerQuery;
     private DateTime? nextWorkshopUpdateCheck;
     private DateTime? nextWorkshopUpdateAnnouncement;
+    private DateTime? welcomeRestartTimestamp;
     private readonly HashSet<string> pendingWorkshopUpdateIds = new(StringComparer.OrdinalIgnoreCase);
     private int workshopUpdateCheckRunning;
     private int? lastKnownOnlinePlayerCount;
@@ -75,6 +89,43 @@ public partial class MainWindow : Window
     private string? startupConfigWarning;
     private string? loadedConfigIdentity;
     private readonly Dictionary<string, (long Length, DateTime LastWriteUtc)> loadedFileStates = new();
+    private static readonly HashSet<string> FixedSandboxKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "DayLength", "WaterShutModifier", "ElecShutModifier", "FoodLootNew", "WeaponLootNew",
+        "AmmoLootNew", "MedicalLootNew", "OtherLootNew", "HoursForLootRespawn",
+        "CharacterFreePoints", "StarterKit", "StatsDecrease", "EndRegen", "Nutrition",
+        "InjurySeverity", "BoneFracture", "ClothingDegradation", "MultiHitZombies",
+        "RearVulnerability", "BloodLevel", "PlayerDamageFromCrash", "MultiplierConfig.Global",
+        "ZombieLore.Speed", "ZombieLore.Strength", "ZombieLore.Toughness",
+        "ZombieLore.Transmission", "ZombieConfig.PopulationMultiplier",
+        "ZombieConfig.PopulationPeakMultiplier", "ZombieConfig.PopulationPeakDay",
+        "ZombieConfig.RespawnHours"
+    };
+    private static readonly HashSet<string> FeaturedWorldKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "StartYear", "StartMonth", "StartDay", "StartTime", "DayNightCycle", "ClimateCycle",
+        "FogCycle", "WaterShut", "ElecShut", "AlarmDecay", "AlarmDecayModifier",
+        "Temperature", "Rain", "ErosionSpeed", "ErosionDays", "Farming", "CompostTime",
+        "NatureAbundance", "Alarm", "LockedHouses", "FoodRotSpeed", "FridgeFactor",
+        "SeenHoursPreventLootRespawn", "MaxItemsForLootRespawn", "ConstructionPreventsLootRespawn",
+        "HoursForWorldItemRemoval", "ItemRemovalListBlacklistToggle", "TimeSinceApo",
+        "PlantResilience", "PlantAbundance", "Helicopter", "MetaEvent", "SleepingEvent",
+        "GeneratorFuelConsumption", "GeneratorSpawning", "SurvivorHouseChance",
+        "VehicleStoryChance", "EnableTaintedWaterText", "Map.AllowMiniMap", "Map.AllowWorldMap",
+        "Map.MapAllKnown", "Map.MapNeedsLight"
+    };
+    private static readonly HashSet<string> FeaturedPlayerKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ConstructionBonusPoints", "MinutesPerPage", "AttackBlockMovements", "EnablePoisoning",
+        "AllClothesUnlocked", "EnableVehicles", "CarSpawnRate", "VehicleEasyUse", "LockedCar",
+        "CarGasConsumption", "CarGeneralCondition", "CarDamageOnImpact",
+        "DamageToPlayerFromHitByACar", "CarAlarm", "AllowExteriorGenerator"
+    };
+    private static readonly HashSet<string> FeaturedZombieRootKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Zombies", "Distribution", "ZombieVoronoiNoise", "ZombieRespawn", "ZombieMigrate",
+        "ZombieHealthImpact", "ZombieAttractionMultiplier"
+    };
     private static readonly string AppVersion =
         typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "未知";
@@ -148,8 +199,8 @@ public partial class MainWindow : Window
             ["MedicalLootNew"] = (0, 4, "0.00–4.00"),
             ["OtherLootNew"] = (0, 4, "0.00–4.00"),
             ["CharacterFreePoints"] = (-100, 100, "-100–100"),
-            ["StatsDecrease"] = (1, 4, "1–4"),
-            ["EndRegen"] = (1, 4, "1–4"),
+            ["StatsDecrease"] = (1, 5, "1–5"),
+            ["EndRegen"] = (1, 5, "1–5"),
             ["InjurySeverity"] = (1, 3, "1–3"),
             ["ClothingDegradation"] = (1, 4, "1–4"),
             ["RearVulnerability"] = (1, 3, "1–3"),
@@ -169,7 +220,17 @@ public partial class MainWindow : Window
         HeaderVersionText.Text = $"v{AppVersion}";
         InitializeSettingChoices();
         LoadSettings();
+        ManagerLogService.Initialize(settings.ManagerLogRetentionDays);
+        LogRetentionDaysBox.Text = settings.ManagerLogRetentionDays.ToString(CultureInfo.InvariantCulture);
+        ManagerLogPathText.Text = $"記錄位置：{ManagerLogService.LogDirectory}";
+        SettingFilterCombo.SelectedIndex = 0;
+        ModFilterCombo.SelectedIndex = 0;
+        if (settings.CheckForManagerUpdates)
+            updateCheckTask = SafeManagerUpdateCheckAsync();
         uiInitialized = true;
+        if (managedWorkshopIds.Count > 0 || !string.IsNullOrWhiteSpace(settings.Mods))
+            FindInstalledModEntries(managedWorkshopIds, false);
+        if (modModelHasPendingRepair) SetConfigDirty(true);
         WizardSteamCmdPathBox.Text = settings.SteamCmdPath;
         WizardInstallPathBox.Text = settings.InstallDirectory;
         VerifyWindowsServerEnvironment();
@@ -179,6 +240,7 @@ public partial class MainWindow : Window
         Loaded += (_, _) =>
         {
             if (IsPzServerInstalled()) ScanExistingServers();
+            RefreshEnvironmentCheck(false);
             if (!string.IsNullOrWhiteSpace(startupConfigWarning))
             {
                 MessageBox.Show(startupConfigWarning, "設定檔編碼已安全回復",
@@ -191,6 +253,9 @@ public partial class MainWindow : Window
         logFlushTimer.Tick += (_, _) => FlushPendingLogs();
         logFlushTimer.Start();
         setupActivityTimer.Tick += (_, _) => UpdateSetupElapsed();
+        AddHandler(TextBox.TextChangedEvent, new TextChangedEventHandler(ConfigControlChanged));
+        AddHandler(CheckBox.ClickEvent, new RoutedEventHandler(ConfigControlChanged));
+        AddHandler(ComboBox.SelectionChangedEvent, new SelectionChangedEventHandler(ConfigControlChanged));
         Closing += async (_, e) =>
         {
             if (serverProcess is { HasExited: false })
@@ -261,6 +326,7 @@ public partial class MainWindow : Window
         LocalizationService.SetFormattedTitle(this,
             "PZ Build 42 伺服器管理器 v{0}", AppVersion);
         LocalizationService.Apply(this);
+        RefreshFeaturedRowLocalization();
     }
 
     private void UiFontCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -595,12 +661,56 @@ public partial class MainWindow : Window
         var fullContent = FullSettingsTab.Content;
         BasicSettingsTab.Content = null;
         FullSettingsTab.Content = null;
+        FullSettingsPages.Items.Clear();
         MainTabs.Items.Remove(BasicSettingsTab);
         MainTabs.Items.Remove(FullSettingsTab);
-        var settingsPages = new TabControl { Margin = new Thickness(8) };
-        settingsPages.Items.Add(new TabItem { Header = "基礎設定", Content = basicContent });
-        settingsPages.Items.Add(new TabItem { Header = "完整設定", Content = fullContent });
-        MainTabs.Items.Insert(1, new TabItem { Header = "伺服器設定", Content = settingsPages });
+
+        var compactTabStyle = (Style)FindResource("CompactSettingsTabItem");
+        var settingsRailStyle = (Style)FindResource("SettingsRailTabItem");
+
+        var basicCategories = new TabControl
+        {
+            Margin = new Thickness(2),
+            TabStripPlacement = Dock.Left,
+            ItemContainerStyle = settingsRailStyle,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch
+        };
+        basicCategories.Items.Add(new TabItem { Header = "伺服器基礎", Content = basicContent });
+        basicCategories.Items.Add(ServerPermissionsPage);
+        basicCategories.Items.Add(WorldItemsPage);
+        basicCategories.Items.Add(PlayerSurvivalPage);
+        basicCategories.Items.Add(ZombiePage);
+        basicCategories.Items.Add(ModsPage);
+
+        var extendedCategories = new TabControl
+        {
+            Margin = new Thickness(2),
+            ItemContainerStyle = compactTabStyle,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch
+        };
+        extendedCategories.Items.Add(ModSettingsPage);
+        extendedCategories.Items.Add(RawSettingsPage);
+
+        var advancedCategories = new TabControl
+        {
+            Margin = new Thickness(2),
+            TabStripPlacement = Dock.Left,
+            ItemContainerStyle = settingsRailStyle,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch
+        };
+        advancedCategories.Items.Add(AdvancedServerPage);
+        advancedCategories.Items.Add(WorldDetailsPage);
+        advancedCategories.Items.Add(PlayerDetailsPage);
+        advancedCategories.Items.Add(ZombieDetailsPage);
+        advancedCategories.Items.Add(AntiCheatPage);
+        advancedCategories.Items.Add(new TabItem { Header = "模組／原始", Content = extendedCategories });
+
+        FullSettingsPages.Items.Add(new TabItem { Header = "基礎設定", Content = basicCategories });
+        FullSettingsPages.Items.Add(new TabItem { Header = "進階設定", Content = advancedCategories });
+        MainTabs.Items.Insert(1, new TabItem { Header = "伺服器設定", Content = fullContent });
     }
 
     private void InitializeSettingChoices()
@@ -640,6 +750,7 @@ public partial class MainWindow : Window
 
     private void SettingsToUi()
     {
+        suppressDirtyTracking = true;
         SteamCmdPathBox.Text = settings.SteamCmdPath; InstallPathBox.Text = settings.InstallDirectory;
         DataPathBox.Text = settings.DataDirectory; ServerNameBox.Text = settings.ServerName;
         PublicNameBox.Text = settings.PublicName; DescriptionBox.Text = settings.Description;
@@ -650,6 +761,7 @@ public partial class MainWindow : Window
         PauseCheck.IsChecked = settings.PauseEmpty; OpenCheck.IsChecked = settings.Open;
         AutoRestartCheck.IsChecked = settings.AutoRestart; RestartHoursBox.Text = settings.RestartHours.ToString();
         WarningMinutesBox.Text = settings.WarningMinutes.ToString(); BackupCheck.IsChecked = settings.BackupBeforeRestart;
+        ShowRestartInWelcomeCheck.IsChecked = settings.ShowScheduledRestartInWelcome;
         PlayerQueryMinutesBox.Text = settings.PlayerQueryMinutes.ToString();
         RestartMessageBox.Text = settings.RestartWarningMessage;
         AutoWorkshopUpdateCheck.IsChecked = settings.AutoWorkshopUpdate;
@@ -685,9 +797,19 @@ public partial class MainWindow : Window
         SelectByTag(RearVulnerabilityCombo, settings.RearVulnerability);
         SelectByTag(BloodLevelCombo, settings.BloodLevel);
         PlayerDamageFromCrashCheck.IsChecked = settings.PlayerDamageFromCrash;
-        WelcomeBox.Text = settings.WelcomeMessage; WorkshopBox.Text = settings.WorkshopItems; ModsBox.Text = settings.Mods;
+        WelcomeBox.Text = settings.WelcomeMessage;
+        SetManagedWorkshopIds(settings.WorkshopItems);
+        WorkshopBox.Text = "";
+        ModsBox.Text = settings.Mods;
         MapFoldersBox.Text = settings.MapFolders;
-        ResolvedModsText.Text = string.IsNullOrWhiteSpace(settings.Mods) ? "尚未解析" : $"已解析：{settings.Mods}";
+        var enabledModCount = NormalizeSemicolonList(settings.Mods)
+            .Split(';', StringSplitOptions.RemoveEmptyEntries).Length;
+        if (managedWorkshopIds.Count == 0)
+            LocalizationService.SetText(ResolvedModsText, "目前尚未加入 Workshop 模組");
+        else
+            LocalizationService.SetFormattedText(ResolvedModsText,
+                "目前 {0} 個 Workshop；已啟用 {1} 個 Mod ID",
+                managedWorkshopIds.Count, enabledModCount);
         RconPortBox.Text = settings.RconPort.ToString(); RconPasswordBox.Password = settings.RconPassword;
         SelectByTag(DayLengthCombo, settings.DayLength); WaterDaysBox.Text = settings.WaterShutDays.ToString();
         ElectricDaysBox.Text = settings.ElectricityShutDays.ToString(); XpBox.Text = LuaNumber(settings.XpMultiplier);
@@ -719,13 +841,10 @@ public partial class MainWindow : Window
         // The text fields and the resolved grid must always represent the same
         // on-disk INI state.  The constructor loads settings before the UI is
         // initialized, so defer the local Workshop scan until later reloads.
-        if (uiInitialized && !string.IsNullOrWhiteSpace(settings.WorkshopItems))
+        if (uiInitialized && (managedWorkshopIds.Count > 0 ||
+                              !string.IsNullOrWhiteSpace(settings.Mods)))
         {
-            var workshopIds = NormalizeWorkshopList(settings.WorkshopItems)
-                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToList();
-            if (workshopIds.Count > 0 && workshopIds.All(id => ulong.TryParse(id, out _)))
-                FindInstalledModEntries(workshopIds, false);
+            FindInstalledModEntries(managedWorkshopIds, false);
         }
         else if (uiInitialized)
         {
@@ -733,6 +852,7 @@ public partial class MainWindow : Window
             ResolvedModsGrid.ItemsSource = null;
             ResolvedModsText.Text = "尚未設定 Workshop 模組。";
         }
+        suppressDirtyTracking = false;
     }
 
     private bool UiToSettings(bool showError = true)
@@ -790,17 +910,22 @@ public partial class MainWindow : Window
             SafetySystem = SafetyCheck.IsChecked == true, SleepAllowed = SleepAllowedCheck.IsChecked == true,
             SleepNeeded = SleepNeededCheck.IsChecked == true, VoiceEnable = VoiceCheck.IsChecked == true,
             PlayerSafehouse = SafehouseCheck.IsChecked == true, WelcomeMessage = WelcomeBox.Text,
-            WorkshopItems = NormalizeWorkshopList(WorkshopBox.Text),
+            WorkshopItems = ManagedWorkshopItems(),
             Mods = NormalizeSemicolonList(ModsBox.Text),
             MapFolders = NormalizeSemicolonList(MapFoldersBox.Text),
             RconPassword = RconPasswordBox.Password, AutoRestart = AutoRestartCheck.IsChecked == true,
             RestartHours = hours, WarningMinutes = warning, PlayerQueryMinutes = playerQueryMinutes,
             BackupBeforeRestart = BackupCheck.IsChecked == true,
+            ShowScheduledRestartInWelcome = ShowRestartInWelcomeCheck.IsChecked == true,
             AutoWorkshopUpdate = autoWorkshopUpdate,
             WorkshopUpdateCheckMinutes = workshopCheckMinutes,
             WorkshopUpdateBroadcast = workshopUpdateBroadcast,
             WorkshopUpdateAnnouncementMinutes = workshopAnnouncementMinutes
         };
+        settings.CheckForManagerUpdates = true;
+        settings.EnableManagerLog = true;
+        settings.ManagerLogRetentionDays = int.TryParse(LogRetentionDaysBox.Text, out var retention)
+            ? Math.Clamp(retention, 1, 365) : 14;
         settings.RestartWarningMessage = string.IsNullOrWhiteSpace(RestartMessageBox.Text)
             ? new ServerSettings().RestartWarningMessage : RestartMessageBox.Text.Trim();
         settings.WorkshopUpdateWarningMessage = string.IsNullOrWhiteSpace(WorkshopUpdateMessageBox.Text)
@@ -1126,7 +1251,7 @@ public partial class MainWindow : Window
                 ["SaveWorldEveryMinutes"] = settings.SaveEveryMinutes.ToString(),
                 ["BackupsCount"] = settings.BuiltInBackups.ToString(),
                 ["SpawnItems"] = settings.SpawnItems,
-                ["ServerWelcomeMessage"] = Clean(settings.WelcomeMessage),
+                ["ServerWelcomeMessage"] = Clean(WelcomeMessageForServer(settings)),
                 ["WorkshopItems"] = settings.WorkshopItems, ["Mods"] = settings.Mods,
                 ["Map"] = settings.MapFolders,
                 ["RCONPort"] = settings.RconPort.ToString(), ["RCONPassword"] = Clean(settings.RconPassword),
@@ -1162,6 +1287,17 @@ public partial class MainWindow : Window
                     // 將所有同名鍵寫成一致值，避免 GUI 與伺服器各讀到不同結果。
                     foreach (var index in indices) lines[index] = $"{pair.Key}={pair.Value}";
                 }
+            }
+            foreach (var row in featuredIniRows.Where(row =>
+                         !string.Equals(row.CurrentValue, row.OriginalValue, StringComparison.Ordinal)))
+            {
+                var pattern = new System.Text.RegularExpressions.Regex(
+                    $@"^\s*{System.Text.RegularExpressions.Regex.Escape(row.Key)}\s*=",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var indices = Enumerable.Range(0, lines.Count).Where(i => pattern.IsMatch(lines[i])).ToList();
+                if (indices.Count == 0)
+                    throw new InvalidDataException($"重點 INI 設定鍵已不存在，請重新讀取：{row.Key}");
+                foreach (var index in indices) lines[index] = $"{row.Key}={row.CurrentValue}";
             }
             var expectedIni = string.Join(Environment.NewLine, lines);
             ConfigFileEncoding.WritePreservingEncoding(iniPath, expectedIni, SelectedEncodingMode());
@@ -1217,6 +1353,18 @@ SandboxVars = {
         var text = ConfigFileEncoding.ReadText(path, SelectedEncodingMode());
         if (!IsBuild42StableSandbox(text))
             throw new InvalidDataException("完整設定只支援目前 Build 42 Sandbox VERSION = 6；檔案未被修改。");
+
+        foreach (var row in featuredSandboxRows.Where(row =>
+                     !string.Equals(row.CurrentValue, row.OriginalValue, StringComparison.Ordinal)))
+        {
+            var dot = row.Key.IndexOf('.');
+            var section = dot > 0 ? row.Key[..dot] : null;
+            var key = dot > 0 ? row.Key[(dot + 1)..] : row.Key;
+            var replaced = ReplaceLuaWholeLineValue(text, key, row.CurrentValue, section);
+            if (string.Equals(replaced, text, StringComparison.Ordinal))
+                throw new InvalidDataException($"重點 Sandbox 設定鍵已不存在，請重新讀取：{row.Key}");
+            text = replaced;
+        }
 
         var top = new Dictionary<string, string> {
             ["DayLength"] = settings.DayLength.ToString(),
@@ -1335,15 +1483,68 @@ SandboxVars = {
             end = FindLuaSectionEnd(text, text.IndexOf('{', start));
         }
         var segment = text[start..end];
-        var pattern = $@"(?m)^(\s*{System.Text.RegularExpressions.Regex.Escape(key)}\s*=\s*)[^,\r\n]+";
-        var replaced = new System.Text.RegularExpressions.Regex(pattern).Replace(segment, $"${{1}}{value}", 1);
-        if (replaced == segment)
+        var pattern = $@"(?m)^(?<prefix>\s*{System.Text.RegularExpressions.Regex.Escape(key)}\s*=\s*)(?<value>.*?)(?<comma>,\s*)$";
+        var regex = new System.Text.RegularExpressions.Regex(pattern);
+        var matches = regex.Matches(segment).Cast<Match>()
+            .Where(match => LuaBraceDepthBefore(segment, match.Index) == 1)
+            .ToList();
+        if (matches.Count == 0)
         {
             if (!allowInsert) return text;
             var insert = section == null ? text.LastIndexOf('}') : end - 1;
-            return text.Insert(insert, $"    {key} = {value},{Environment.NewLine}");
+            var indent = section == null ? "    " : "        ";
+            return text.Insert(insert, $"{indent}{key} = {value},{Environment.NewLine}");
         }
-        return text[..start] + replaced + text[end..];
+        var builder = new StringBuilder(segment);
+        for (var index = matches.Count - 1; index >= 0; index--)
+        {
+            var match = matches[index];
+            if (index == 0)
+            {
+                var replacement = match.Groups["prefix"].Value + value + match.Groups["comma"].Value;
+                builder.Remove(match.Index, match.Length);
+                builder.Insert(match.Index, replacement);
+                continue;
+            }
+            var removeStart = match.Index;
+            var removeLength = match.Length;
+            if (removeStart + removeLength < builder.Length && builder[removeStart + removeLength] == '\r')
+                removeLength++;
+            if (removeStart + removeLength < builder.Length && builder[removeStart + removeLength] == '\n')
+                removeLength++;
+            builder.Remove(removeStart, removeLength);
+        }
+        return text[..start] + builder + text[end..];
+    }
+
+    private static int LuaBraceDepthBefore(string text, int endExclusive)
+    {
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        var inComment = false;
+        for (var index = 0; index < endExclusive; index++)
+        {
+            var character = text[index];
+            if (character == '\n') { inComment = false; continue; }
+            if (inComment) continue;
+            if (inString)
+            {
+                if (escaped) escaped = false;
+                else if (character == '\\') escaped = true;
+                else if (character == '"') inString = false;
+                continue;
+            }
+            if (character == '-' && index + 1 < endExclusive && text[index + 1] == '-')
+            {
+                inComment = true;
+                index++;
+            }
+            else if (character == '"') inString = true;
+            else if (character == '{') depth++;
+            else if (character == '}') depth--;
+        }
+        return depth;
     }
 
     private static int FindLuaSectionEnd(string text, int opening)
@@ -1434,6 +1635,7 @@ SandboxVars = {
             SaveWorldButton.IsEnabled = true;
             PlayerQueryMinutesBox.IsEnabled = false;
             SetStatus("執行中", "#4FC18B"); Log($"伺服器已啟動（PID {serverProcess.Id}）。");
+            lastScheduleResult = $"伺服器程序已啟動（{DateTime.Now:HH:mm:ss}）";
             if (settings.PauseEmpty)
                 Log("Build 42 風險提示：目前 PauseEmpty=true；斷線或快速重連時若發生主迴圈卡死，建議關閉「無玩家時暫停世界」。");
             nextRestart = null;
@@ -1506,6 +1708,7 @@ SandboxVars = {
         _ = Dispatcher.InvokeAsync(async () =>
         {
             Log($"伺服器程序已結束（代碼 {code}）。");
+            lastScheduleResult = $"伺服器程序結束，代碼 {code}（{DateTime.Now:HH:mm:ss}）";
             StartButton.IsEnabled = true; StopButton.IsEnabled = false;
             SaveWorldButton.IsEnabled = false;
             PlayerQueryMinutesBox.IsEnabled = true;
@@ -1917,6 +2120,7 @@ SandboxVars = {
             var target = Path.Combine(backupDir, $"{settings.ServerName}_{DateTime.Now:yyyyMMdd_HHmmss}.zip");
             await Task.Run(() => ZipFile.CreateFromDirectory(source, target, CompressionLevel.Fastest, false));
             Log($"備份完成：{target}");
+            lastScheduleResult = $"ZIP 備份完成（{DateTime.Now:HH:mm:ss}）";
             if (notify) MessageBox.Show($"備份完成：\n{target}", "完成");
         }
         catch (Exception ex) { Log($"備份失敗：{ex.Message}"); if (notify) MessageBox.Show(ex.Message, "備份失敗"); }
@@ -1938,17 +2142,43 @@ SandboxVars = {
 
     private void SaveConfigurationAndVerify()
     {
+        if (!CommitAndValidateFeaturedSettings(out var featuredChanges)) return;
         if (!UiToSettings()) return;
         if (!EnsureModIdsResolved()) return;
         if (!CanWriteConfiguration()) return;
+        welcomeRestartTimestamp = settings.AutoRestart
+            ? nextRestart ?? DateTime.Now.AddHours(settings.RestartHours)
+            : null;
         var expected = CloneSettings(settings);
+        var pendingSummary = CompareManagedPzFiles(expected);
+        pendingSummary.AddRange(featuredChanges.Select(row =>
+            $"重點設定 {row.Key}: {row.OriginalValue} → {row.CurrentValue}"));
+        var summaryText = pendingSummary.Count == 0
+            ? "PZ 設定檔的受管理欄位沒有差異；仍會驗證檔案並儲存管理器設定。"
+            : $"即將寫入並逐欄重讀驗證 {pendingSummary.Count} 項差異：\n\n" +
+              string.Join("\n", pendingSummary.Take(18)) +
+              (pendingSummary.Count > 18 ? $"\n…另有 {pendingSummary.Count - 18} 項" : "");
+        if (MessageBox.Show(summaryText + "\n\n只有按下「是」才會修改檔案。",
+            "儲存前變更摘要", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes)
+            return;
         RunExplicitConfigWrite(WriteServerConfig);
         if (!lastConfigWriteSucceeded) return;
+        var featuredMismatches = CompareFeaturedValuesOnDisk(featuredChanges);
+        if (featuredMismatches.Count > 0)
+        {
+            SetConfigDirty(true);
+            lastConfigWriteSucceeded = false;
+            MessageBox.Show("重點設定寫入後由磁碟核對失敗：\n\n" +
+                string.Join("\n", featuredMismatches.Take(12)),
+                "寫入後值不一致", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
         var mismatches = CompareManagedPzFiles(expected);
         if (mismatches.Count > 0)
         {
             settings = expected;
             SettingsToUi();
+            SetConfigDirty(true);
             lastConfigWriteSucceeded = false;
             MessageBox.Show("檔案寫入後直接由磁碟逐欄驗證失敗，因此不會顯示成功，GUI 也會保留你輸入的值：\n\n" +
                 string.Join("\n", mismatches.Take(12)) +
@@ -1960,6 +2190,7 @@ SandboxVars = {
         {
             settings = expected;
             SettingsToUi();
+            SetConfigDirty(true);
             MessageBox.Show("檔案已寫入，但無法由磁碟重新載入；GUI 保留你輸入的值，未回報儲存成功。",
                 "寫入後驗證失敗", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
@@ -1969,6 +2200,7 @@ SandboxVars = {
         {
             settings = expected;
             SettingsToUi();
+            SetConfigDirty(true);
             lastConfigWriteSucceeded = false;
             MessageBox.Show("寫入後由磁碟讀回的值與輸入不一致，因此不會顯示成功，也不會讓 GUI 跳回舊值：\n\n" +
                 string.Join("\n", mismatches.Take(12)) +
@@ -1977,8 +2209,36 @@ SandboxVars = {
             return;
         }
         PersistSettings();
+        modModelHasPendingRepair = false;
+        SetConfigDirty(false);
         MessageBox.Show("INI 與 SandboxVars 已寫入，且所有 GUI 管理欄位均已由磁碟重新讀回核對一致。",
             "儲存與驗證完成", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private List<string> CompareFeaturedValuesOnDisk(IEnumerable<ConfigValueRow> expectedRows)
+    {
+        var expected = expectedRows.ToList();
+        if (expected.Count == 0) return new List<string>();
+        var serverDir = Path.Combine(settings.DataDirectory, "Server");
+        var iniPath = Path.Combine(serverDir, settings.ServerName + ".ini");
+        var sandboxPath = Path.Combine(serverDir, settings.ServerName + "_SandboxVars.lua");
+        var iniRows = File.Exists(iniPath)
+            ? ParseIniForInspection(iniPath).ToDictionary(row => row.Key, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, ConfigValueRow>(StringComparer.OrdinalIgnoreCase);
+        var sandboxRows = File.Exists(sandboxPath)
+            ? ParseLuaForInspection(sandboxPath).ToDictionary(row => row.Key, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, ConfigValueRow>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>();
+        foreach (var row in expected)
+        {
+            var source = featuredIniRows.Contains(row) ? iniRows : sandboxRows;
+            if (!source.TryGetValue(row.Key, out var actual))
+                result.Add($"{row.Key}：寫入後找不到設定鍵");
+            else if (!string.Equals(NormalizeConfigValue(actual.CurrentValue),
+                         NormalizeConfigValue(row.CurrentValue), StringComparison.OrdinalIgnoreCase))
+                result.Add($"{row.Key}：預期 {row.CurrentValue}，磁碟為 {actual.CurrentValue}");
+        }
+        return result;
     }
 
     private List<string> CompareManagedPzFiles(ServerSettings expected)
@@ -2060,7 +2320,7 @@ SandboxVars = {
     private static ServerSettings CloneSettings(ServerSettings source) =>
         JsonSerializer.Deserialize<ServerSettings>(JsonSerializer.Serialize(source)) ?? new ServerSettings();
 
-    private static List<string> CompareManagedPzSettings(ServerSettings expected, ServerSettings actual)
+    private List<string> CompareManagedPzSettings(ServerSettings expected, ServerSettings actual)
     {
         var expectedValues = ManagedPzValues(expected);
         var actualValues = ManagedPzValues(actual);
@@ -2072,7 +2332,7 @@ SandboxVars = {
             .ToList();
     }
 
-    private static Dictionary<string, string> ManagedPzValues(ServerSettings value) =>
+    private Dictionary<string, string> ManagedPzValues(ServerSettings value) =>
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["DefaultPort"] = value.DefaultPort.ToString(),
@@ -2094,7 +2354,7 @@ SandboxVars = {
             ["SaveWorldEveryMinutes"] = value.SaveEveryMinutes.ToString(),
             ["BackupsCount"] = value.BuiltInBackups.ToString(),
             ["SpawnItems"] = value.SpawnItems,
-            ["ServerWelcomeMessage"] = Clean(value.WelcomeMessage),
+            ["ServerWelcomeMessage"] = Clean(WelcomeMessageForServer(value)),
             ["WorkshopItems"] = value.WorkshopItems,
             ["Mods"] = value.Mods,
             ["Map"] = value.MapFolders,
@@ -2151,11 +2411,32 @@ SandboxVars = {
 
     private async void ResolveMods_Click(object sender, RoutedEventArgs e)
     {
+        await ResolveModsAsync(true);
+    }
+
+    private async Task ResolveModsAsync(bool fullScan)
+    {
         if (!TryPrepareModResolver()) return;
-        var roots = ParseWorkshopIds(WorkshopBox.Text);
-        if (roots == null) return;
+        var pendingIds = fullScan ? new List<string>() : ParseWorkshopIds(WorkshopBox.Text);
+        if (pendingIds == null) return;
+        if (!fullScan && pendingIds.Count == 0)
+        {
+            MessageBox.Show("請先在新增欄位輸入 Workshop ID。既有項目可用「重新檢查全部」或「重新掃描已加入」更新。",
+                "尚未輸入 Workshop ID", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var originalManagedIds = managedWorkshopIds.ToList();
+        var roots = originalManagedIds.Concat(pendingIds)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (roots.Count == 0)
         {
+            if (!string.IsNullOrWhiteSpace(ModsBox.Text))
+            {
+                FindInstalledModEntries(Array.Empty<string>(), false);
+                SortModEntriesByDependencies();
+                ResolvedModsText.Text = "已依現有 Mods 反查本機來源；尚未修改 INI。";
+                return;
+            }
             resolvedModEntries.Clear();
             workshopDependencyEntries.Clear();
             resolvedMapEntries.Clear();
@@ -2169,16 +2450,34 @@ SandboxVars = {
         }
 
         ResolveModsButton.IsEnabled = false;
+        ResolveNewModsButton.IsEnabled = false;
         ModResolveProgress.Visibility = Visibility.Visible;
         try
         {
-            var discoveredIds = await DiscoverWorkshopDependenciesAsync(roots);
+            workshopTitles.Clear();
+            workshopRequirements.Clear();
+            HydrateWorkshopGraphFromCache(roots);
+            var checkRoots = fullScan
+                ? roots
+                : pendingIds.Where(id => !workshopMetadataCache.Items.ContainsKey(id)).ToList();
+            if (!fullScan && checkRoots.Count == 0)
+                ResolvedModsText.Text = "本次輸入沒有尚未檢查的 Workshop；正在重新掃描本機內容…";
+            var refreshedIds = checkRoots.Count > 0
+                ? await DiscoverWorkshopDependenciesAsync(checkRoots, fullScan)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var id in refreshedIds)
+                workshopMetadataCache.Items[id] = new WorkshopCacheItem
+                {
+                    Title = workshopTitles.GetValueOrDefault(id, id),
+                    Requirements = workshopRequirements.GetValueOrDefault(id, new List<string>()),
+                    CheckedUtc = DateTime.UtcNow
+                };
+            workshopMetadataCache.Save();
+            var discoveredIds = CollectReachableWorkshopIds(roots);
             RefreshWorkshopDependencyCandidates(roots, discoveredIds);
-            var workshopIds = roots;
-            WorkshopBox.Text = string.Join(';', workshopIds);
-            settings.WorkshopItems = WorkshopBox.Text;
-            var (_, missingBefore) = FindInstalledModEntries(workshopIds, false);
-            foreach (var id in missingBefore)
+            var downloadIds = (fullScan ? originalManagedIds : pendingIds)
+                .Where(id => !IsWorkshopDownloaded(id)).ToList();
+            foreach (var id in downloadIds)
             {
                 ResolvedModsText.Text = $"正在下載 Workshop {id}…";
                 var args = $"+force_install_dir \"{settings.InstallDirectory}\" +login anonymous " +
@@ -2188,13 +2487,27 @@ SandboxVars = {
                 if (code != 0) Log($"Workshop {id} 下載結束代碼：{code}");
             }
 
-            var (_, missingAfter) = FindInstalledModEntries(workshopIds, true);
+            var (acceptedPending, failedPending) = ClassifyPendingWorkshopIds(
+                pendingIds, originalManagedIds);
+            var finalManagedIds = originalManagedIds.Concat(acceptedPending)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            SetManagedWorkshopIds(finalManagedIds);
+            WorkshopBox.Text = string.Join(';', failedPending);
+
+            var (_, missingAfter) = FindInstalledModEntries(finalManagedIds, false);
             SortModEntriesByDependencies();
-            ApplyResolvedMods(false, false);
+            if (acceptedPending.Except(originalManagedIds,
+                    StringComparer.OrdinalIgnoreCase).Any())
+                SetConfigDirty(true);
+            if (failedPending.Count > 0)
+                MessageBox.Show(
+                    "下列新增項目未完成下載，已保留在新增欄位，可稍後直接重試：\n" +
+                    string.Join("\n", failedPending),
+                    "部分 Workshop 尚未加入", MessageBoxButton.OK, MessageBoxImage.Warning);
             if (missingAfter.Count > 0)
                 MessageBox.Show(
-                    $"下列 Workshop 項目下載後仍找不到 mod.info／id：\n{string.Join("\n", missingAfter)}\n\n" +
-                    "可能是純素材、地圖、下載失敗，或項目尚未支援 Build 42。",
+                    $"下列已管理 Workshop 找不到目前 Build 42 mod.info／Mod ID：\n{string.Join("\n", missingAfter)}\n\n" +
+                    "項目仍保留在伺服器清單；可能是純素材、下載不完整或尚未支援 Build 42。",
                     "部分項目無法解析", MessageBoxButton.OK, MessageBoxImage.Warning);
             else if (resolvedModEntries.Any(entry =>
                          entry.Status.Contains("缺少依賴") ||
@@ -2204,7 +2517,7 @@ SandboxVars = {
                     "請從 Steam 依賴候選中選擇要加入的 Workshop，或取消不需要的相容補丁。",
                     "需要選擇依賴", MessageBoxButton.OK, MessageBoxImage.Information);
             else
-                MessageBox.Show("解析完成。請檢查多 ID 項目的勾選，再按「套用勾選與順序」。\n尚未寫入 PZ INI。",
+                MessageBox.Show("解析完成。新 Mod ID 不會自動啟用；請勾選需要的項目，再按「套用勾選與順序」。\n尚未寫入 PZ INI。",
                     "模組管理清單已更新");
         }
         catch (Exception ex)
@@ -2216,16 +2529,51 @@ SandboxVars = {
         finally
         {
             ResolveModsButton.IsEnabled = true;
+            ResolveNewModsButton.IsEnabled = true;
             ModResolveProgress.Visibility = Visibility.Collapsed;
         }
+    }
+
+    private bool IsWorkshopDownloaded(string workshopId)
+    {
+        foreach (var itemRoot in GetWorkshopItemRoots(workshopId).Where(Directory.Exists))
+        {
+            try
+            {
+                if (Directory.EnumerateFileSystemEntries(itemRoot, "*",
+                        SearchOption.AllDirectories).Any())
+                    return true;
+            }
+            catch (Exception ex) { Log($"無法確認 Workshop {workshopId} 下載狀態：{ex.Message}"); }
+        }
+        return false;
+    }
+
+    private (List<string> Accepted, List<string> Failed) ClassifyPendingWorkshopIds(
+        IEnumerable<string> pendingIds, IEnumerable<string> existingIds)
+    {
+        var existing = existingIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pending = pendingIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var accepted = pending.Where(id => existing.Contains(id) || IsWorkshopDownloaded(id))
+            .ToList();
+        var failed = pending.Except(accepted, StringComparer.OrdinalIgnoreCase).ToList();
+        return (accepted, failed);
     }
 
     private void RefreshLocalMods_Click(object sender, RoutedEventArgs e)
     {
         if (!TryPrepareModResolver(false)) return;
-        var ids = ParseWorkshopIds(WorkshopBox.Text);
-        if (ids == null) return;
-        FindInstalledModEntries(ids, false);
+        if (managedWorkshopIds.Count == 0)
+        {
+            if (string.IsNullOrWhiteSpace(ModsBox.Text))
+            {
+                MessageBox.Show("目前伺服器尚未加入 Workshop 或本機 Mod。", "清單為空");
+                return;
+            }
+            FindInstalledModEntries(Array.Empty<string>(), false);
+            return;
+        }
+        FindInstalledModEntries(managedWorkshopIds, false);
     }
 
     private void AddSelectedWorkshopDependencies_Click(object sender, RoutedEventArgs e)
@@ -2250,7 +2598,7 @@ SandboxVars = {
             entry.Status = "已加入輸入清單；等待重新解析";
         }
         WorkshopDependencyGrid.Items.Refresh();
-        ResolvedModsText.Text = $"已加入 {selected.Count} 個候選；請再按「下載／解析並檢查依賴」。";
+        ResolvedModsText.Text = $"已放入新增欄位 {selected.Count} 個候選；請按「加入並解析」。";
     }
 
     private bool TryPrepareModResolver(bool requireSteamCmd = true)
@@ -2277,89 +2625,175 @@ SandboxVars = {
     private List<string>? ParseWorkshopIds(string text)
     {
         var ids = NormalizeWorkshopList(text).Split(';', StringSplitOptions.RemoveEmptyEntries).ToList();
-        if (ids.Any(id => !ulong.TryParse(id, out _)))
+        var invalid = ids.Where(id => !ulong.TryParse(id, out _)).Distinct().ToList();
+        if (invalid.Count > 0)
         {
-            MessageBox.Show("Workshop ID 只能包含數字，請以分號分隔。", "格式錯誤");
+            MessageBox.Show("Workshop ID 只能包含數字，請以分號分隔。\n\n無效項目：\n" +
+                string.Join("\n", invalid), "格式錯誤");
             return null;
         }
         return ids.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private async Task<List<string>> DiscoverWorkshopDependenciesAsync(List<string> roots)
+    private string ManagedWorkshopItems() => string.Join(';', managedWorkshopIds);
+
+    private void SetManagedWorkshopIds(string value) =>
+        SetManagedWorkshopIds(NormalizeWorkshopList(value)
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private void SetManagedWorkshopIds(IEnumerable<string> ids)
     {
-        workshopRequirements.Clear();
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("PZServerManager/" + AppVersion);
+        managedWorkshopIds.Clear();
+        managedWorkshopIds.AddRange(ids.Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
+        settings.WorkshopItems = ManagedWorkshopItems();
+    }
+
+    private void HydrateWorkshopGraphFromCache(IEnumerable<string> roots)
+    {
+        var queue = new Queue<string>(roots);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (queue.Count > 0 && visited.Count < 100)
+        {
+            var id = queue.Dequeue();
+            if (!visited.Add(id) || !workshopMetadataCache.Items.TryGetValue(id, out var cached)) continue;
+            workshopTitles[id] = cached.Title;
+            workshopRequirements[id] = cached.Requirements.ToList();
+            foreach (var dependency in cached.Requirements)
+                if (!visited.Contains(dependency)) queue.Enqueue(dependency);
+        }
+    }
+
+    private List<string> CollectReachableWorkshopIds(IEnumerable<string> roots)
+    {
+        var result = new List<string>();
         var queue = new Queue<string>(roots);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (queue.Count > 0 && visited.Count < 100)
         {
             var id = queue.Dequeue();
             if (!visited.Add(id)) continue;
+            result.Add(id);
+            if (!workshopRequirements.TryGetValue(id, out var dependencies)) continue;
+            foreach (var dependency in dependencies)
+                if (!visited.Contains(dependency)) queue.Enqueue(dependency);
+        }
+        return result;
+    }
+
+    private async Task<HashSet<string>> DiscoverWorkshopDependenciesAsync(
+        List<string> roots, bool forceRefresh)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("PZServerManager/" + AppVersion);
+        var queue = new Queue<string>(roots);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var refreshed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rateLimitBlocked = false;
+        while (queue.Count > 0 && visited.Count < 100)
+        {
+            var id = queue.Dequeue();
+            if (!visited.Add(id)) continue;
             ResolvedModsText.Text = $"正在向 Steam 檢查依賴：{id}（{visited.Count}）";
+            var hasCache = workshopMetadataCache.Items.TryGetValue(id, out var cached);
+            if (hasCache)
+            {
+                workshopTitles[id] = cached!.Title;
+                workshopRequirements[id] = cached.Requirements.ToList();
+            }
+            if ((!forceRefresh && hasCache) || rateLimitBlocked)
+            {
+                EnqueueKnownWorkshopDependencies(id, visited, queue);
+                continue;
+            }
             try
             {
-                string html;
-                using (var response = await client.GetAsync(
-                    $"https://steamcommunity.com/sharedfiles/filedetails/?id={id}"))
+                var fetch = await FetchWorkshopPageWithRetryAsync(client, id, hasCache);
+                if (fetch.RateLimitBlocked)
                 {
-                    if ((int)response.StatusCode == 429)
-                    {
-                        await Task.Delay(1500);
-                        using var retry = await client.GetAsync(
-                            $"https://steamcommunity.com/sharedfiles/filedetails/?id={id}");
-                        retry.EnsureSuccessStatusCode();
-                        html = await retry.Content.ReadAsStringAsync();
-                    }
-                    else
-                    {
-                        response.EnsureSuccessStatusCode();
-                        html = await response.Content.ReadAsStringAsync();
-                    }
+                    rateLimitBlocked = true;
+                    LocalizationService.SetText(ResolvedModsText,
+                        "Steam 暫時限制 Workshop 請求；已停止本次網路查詢並沿用快取／本機資料。稍後可再檢查。");
+                    Log("Steam Workshop 回傳 429；本次掃描已停止後續網路請求，避免持續觸發限制。可用資料保留快取內容。");
                 }
-                var title = ParseWorkshopTitleHtml(html);
+                if (fetch.Html == null)
+                {
+                    EnqueueKnownWorkshopDependencies(id, visited, queue);
+                    continue;
+                }
+                var title = ParseWorkshopTitleHtml(fetch.Html);
                 if (!string.IsNullOrWhiteSpace(title)) workshopTitles[id] = title;
-                var dependencies = ParseRequiredWorkshopItemsHtml(html);
+                var dependencies = ParseRequiredWorkshopItemsHtml(fetch.Html);
                 workshopRequirements[id] = dependencies;
+                refreshed.Add(id);
                 foreach (var dependency in dependencies)
                     if (!visited.Contains(dependency)) queue.Enqueue(dependency);
-                await Task.Delay(220);
+                await Task.Delay(TimeSpan.FromMilliseconds(1100 + Random.Shared.Next(100, 350)));
             }
             catch (Exception ex)
             {
-                workshopRequirements[id] = new List<string>();
                 Log($"無法從 Steam 取得 Workshop {id} 依賴：{ex.Message}");
+                EnqueueKnownWorkshopDependencies(id, visited, queue);
             }
         }
+        return refreshed;
+    }
 
-        var ordered = new List<string>();
-        var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var complete = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Visit(string id)
+    private void EnqueueKnownWorkshopDependencies(
+        string id, HashSet<string> visited, Queue<string> queue)
+    {
+        if (!workshopRequirements.TryGetValue(id, out var dependencies)) return;
+        foreach (var dependency in dependencies)
+            if (!visited.Contains(dependency)) queue.Enqueue(dependency);
+    }
+
+    private async Task<(string? Html, bool RateLimitBlocked)> FetchWorkshopPageWithRetryAsync(
+        HttpClient client, string id, bool hasCache)
+    {
+        var attempts = hasCache ? 1 : 4;
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
-            if (complete.Contains(id)) return;
-            if (!active.Add(id))
+            using var response = await client.GetAsync(
+                $"https://steamcommunity.com/sharedfiles/filedetails/?id={id}");
+            if (response.IsSuccessStatusCode)
+                return (await response.Content.ReadAsStringAsync(), false);
+            if ((int)response.StatusCode == 429)
             {
-                Log($"Workshop 依賴形成循環：{id}。保留目前相對順序。");
-                return;
+                if (attempt + 1 >= attempts) return (null, true);
+                var delay = CalculateWorkshopRetryDelay(response, attempt);
+                ResolvedModsText.Text =
+                    $"Steam 請求過於頻繁；{Math.Ceiling(delay.TotalSeconds):0} 秒後重試 Workshop {id}…";
+                Log($"Steam Workshop 429：等待 {delay.TotalSeconds:0.0} 秒後重試（{attempt + 1}/{attempts - 1}）。");
+                await Task.Delay(delay);
+                continue;
             }
-            if (workshopRequirements.TryGetValue(id, out var dependencies))
-                foreach (var dependency in dependencies) Visit(dependency);
-            active.Remove(id);
-            complete.Add(id);
-            if (!ordered.Contains(id, StringComparer.OrdinalIgnoreCase)) ordered.Add(id);
+            if ((int)response.StatusCode >= 500 && attempt + 1 < attempts)
+            {
+                await Task.Delay(CalculateWorkshopRetryDelay(response, attempt));
+                continue;
+            }
+            response.EnsureSuccessStatusCode();
         }
-        foreach (var root in roots) Visit(root);
-        foreach (var discovered in visited) Visit(discovered);
-        return ordered;
+        return (null, false);
+    }
+
+    private static TimeSpan CalculateWorkshopRetryDelay(HttpResponseMessage response, int attempt)
+    {
+        var exponentialSeconds = attempt switch { 0 => 3, 1 => 7, _ => 15 };
+        var retryAfter = response.Headers.RetryAfter?.Delta;
+        if (!retryAfter.HasValue && response.Headers.RetryAfter?.Date is { } retryDate)
+            retryAfter = retryDate - DateTimeOffset.UtcNow;
+        var seconds = Math.Clamp(Math.Max(exponentialSeconds, retryAfter?.TotalSeconds ?? 0), 1, 60);
+        return TimeSpan.FromMilliseconds(seconds * 1000 + Random.Shared.Next(150, 450));
     }
 
     private void RefreshWorkshopDependencyCandidates(
         IReadOnlyCollection<string> roots, IEnumerable<string> discoveredIds)
     {
         var rootSet = roots.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var discoveredSet = discoveredIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var requiredBy = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in workshopRequirements)
+        foreach (var pair in workshopRequirements.Where(pair => discoveredSet.Contains(pair.Key)))
         {
             foreach (var dependency in pair.Value)
             {
@@ -2411,12 +2845,13 @@ SandboxVars = {
         if (workshopIds == null) return false;
         if (workshopIds.Count == 0)
         {
-            settings.Mods = "";
-            settings.MapFolders = new ServerSettings().MapFolders;
-            ModsBox.Text = "";
-            MapFoldersBox.Text = settings.MapFolders;
-            ResolvedModsText.Text = "未設定 Workshop 項目";
-            return true;
+            if (string.IsNullOrWhiteSpace(settings.Mods))
+            {
+                ResolvedModsText.Text = "未設定 Workshop 或本機 Mod";
+                return true;
+            }
+            FindInstalledModEntries(Array.Empty<string>(), false);
+            return ApplyResolvedMods(false, true);
         }
         if (!string.Equals(resolvedWorkshopIdentity, string.Join(';', workshopIds),
                 StringComparison.OrdinalIgnoreCase))
@@ -2428,7 +2863,7 @@ SandboxVars = {
                 Log("本機尚未解析到 mod.info；保留 INI 目前 Mods，不自動清空。");
                 return true;
             }
-            MessageBox.Show("尚未解析任何 Mod ID。請先按「下載／解析並檢查依賴」。",
+            MessageBox.Show("尚未解析任何 Mod ID。請先按「檢查本次新增」或「檢查全部」。",
                 "需要解析模組", MessageBoxButton.OK, MessageBoxImage.Warning);
             return false;
         }
@@ -2438,24 +2873,23 @@ SandboxVars = {
     private (List<ModEntry> Entries, List<string> MissingWorkshopIds) FindInstalledModEntries(
         IEnumerable<string> workshopIds, bool selectNewSingles)
     {
-        var ids = workshopIds.ToList();
+        var ids = workshopIds.Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        HydrateWorkshopGraphFromCache(ids);
         var previousOrder = NormalizeSemicolonList(ModsBox.Text)
             .Split(';', StringSplitOptions.RemoveEmptyEntries).ToList();
         var previousSet = previousOrder.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var entriesById = new Dictionary<string, ModEntry>(StringComparer.OrdinalIgnoreCase);
         var obsoleteBuildVariantIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var missing = new List<string>();
-        var steamCmdDirectory = Path.GetDirectoryName(settings.SteamCmdPath) ?? "";
-
         foreach (var workshopId in ids)
         {
             var foundForItem = false;
             var itemEntries = new List<ModEntry>();
-            var itemRoots = new[]
-            {
-                Path.Combine(settings.InstallDirectory, "steamapps", "workshop", "content", "108600", workshopId),
-                Path.Combine(steamCmdDirectory, "steamapps", "workshop", "content", "108600", workshopId)
-            }.Distinct(StringComparer.OrdinalIgnoreCase);
+            var validWorkshopId = ulong.TryParse(workshopId, out _);
+            var itemRoots = validWorkshopId
+                ? GetWorkshopItemRoots(workshopId)
+                : Enumerable.Empty<string>();
             foreach (var itemRoot in itemRoots.Where(Directory.Exists))
             {
                 List<string> infoFiles;
@@ -2479,39 +2913,32 @@ SandboxVars = {
                     catch { }
                 }
                 foreach (var infoFile in selectedInfoFiles)
-                {
-                    try
-                    {
-                        var text = ConfigFileEncoding.ReadText(infoFile, "Auto");
-                        var modId = ModInfoValue(text, "id");
-                        if (string.IsNullOrWhiteSpace(modId)) continue;
+                    if (MergeModInfoFile(entriesById, itemEntries, workshopId, infoFile,
+                            previousSet) != null)
                         foundForItem = true;
-                        if (!entriesById.TryGetValue(modId, out var entry))
-                        {
-                            entry = new ModEntry {
-                                WorkshopId = workshopId,
-                                WorkshopTitle = workshopTitles.GetValueOrDefault(workshopId, ""),
-                                ModName = ModInfoValue(text, "name"),
-                                ModId = modId,
-                                Variant = Build42VariantLabel(infoFile, text),
-                                Enabled = previousSet.Contains(modId),
-                                SourceFile = infoFile
-                            };
-                            InspectModRuntime(entry);
-                            entriesById[modId] = entry;
-                            itemEntries.Add(entry);
-                        }
-                        MergeDistinct(entry.Requires, SplitModInfoList(ModInfoValue(text, "require")));
-                        MergeDistinct(entry.LoadBefore, SplitModInfoList(ModInfoValue(text, "loadBefore")));
-                        MergeDistinct(entry.LoadBefore, SplitModInfoList(ModInfoValue(text, "loadModBefore")));
-                        MergeDistinct(entry.LoadAfter, SplitModInfoList(ModInfoValue(text, "loadAfter")));
-                        MergeDistinct(entry.LoadAfter, SplitModInfoList(ModInfoValue(text, "loadModAfter")));
-                        MergeDistinct(entry.MapFolders, FindMapFolders(infoFile));
-                    }
-                    catch (Exception ex) { Log($"讀取 {infoFile} 失敗：{ex.Message}"); }
-                }
             }
-            if (!foundForItem) missing.Add(workshopId);
+            if (!foundForItem)
+            {
+                missing.Add(workshopId);
+                var title = workshopTitles.GetValueOrDefault(workshopId, "");
+                if (title.Length == 0 && workshopMetadataCache.Items.TryGetValue(workshopId, out var cached))
+                    title = cached.Title;
+                entriesById["\0workshop:" + workshopId] = new ModEntry
+                {
+                    WorkshopId = workshopId,
+                    WorkshopTitle = title.Length == 0 ? "尚未取得名稱" : title,
+                    ModName = "尚未解析 Mod ID",
+                    ModId = "",
+                    Enabled = false,
+                    Variant = "—",
+                    Category = "Workshop 項目",
+                    ClientPolicy = "尚未判定",
+                    SelectionPolicy = "可直接移出伺服器",
+                    Status = validWorkshopId
+                        ? "尚未下載或找不到 Build 42 mod.info"
+                        : "Workshop ID 格式無效"
+                };
+            }
             MarkMutuallyExclusiveAlternatives(itemEntries);
             if (selectNewSingles && itemEntries.Count == 1 &&
                 !previousSet.Any(id => itemEntries.Any(entry =>
@@ -2519,11 +2946,33 @@ SandboxVars = {
                 itemEntries[0].Enabled = true;
         }
 
+        var unresolvedIds = previousOrder.Where(id =>
+                !entriesById.ContainsKey(id) && !obsoleteBuildVariantIds.Contains(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (unresolvedIds.Count > 0)
+        {
+            var inferredWorkshopIds = LinkUnresolvedInstalledMods(
+                unresolvedIds, previousSet, entriesById);
+            foreach (var inferredId in inferredWorkshopIds)
+            {
+                if (!ids.Contains(inferredId, StringComparer.OrdinalIgnoreCase)) ids.Add(inferredId);
+                if (!managedWorkshopIds.Contains(inferredId, StringComparer.OrdinalIgnoreCase))
+                    managedWorkshopIds.Add(inferredId);
+            }
+            if (inferredWorkshopIds.Count > 0)
+            {
+                settings.WorkshopItems = ManagedWorkshopItems();
+                modModelHasPendingRepair = true;
+                Log("已從本機 mod.info 反查 Workshop ID：" + string.Join(", ", inferredWorkshopIds));
+            }
+        }
+
         foreach (var oldId in previousOrder.Where(id =>
                      !entriesById.ContainsKey(id) && !obsoleteBuildVariantIds.Contains(id)))
             entriesById[oldId] = new ModEntry {
                 ModId = oldId, ModName = oldId, Enabled = true,
-                Category = "未解析", Status = "目前找不到 mod.info；保留既有值"
+                Category = "未解析", Status = "目前找不到 mod.info；保留既有值",
+                SelectionPolicy = "可取消勾選，從 Mods 移除"
             };
 
         resolvedModEntries.Clear();
@@ -2544,6 +2993,148 @@ SandboxVars = {
         foreach (var obsolete in previousOrder.Where(obsoleteBuildVariantIds.Contains))
             Log($"已排除非目前 Build 42 變體 Mod ID：{obsolete}");
         return (resolvedModEntries, missing);
+    }
+
+    private IEnumerable<string> GetWorkshopContentRoots()
+    {
+        var steamCmdDirectory = Path.GetDirectoryName(settings.SteamCmdPath) ?? "";
+        return new[] { settings.InstallDirectory, steamCmdDirectory }
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => Path.Combine(path, "steamapps", "workshop", "content", "108600"))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private IEnumerable<string> GetWorkshopItemRoots(string workshopId) =>
+        GetWorkshopContentRoots().Select(root => Path.Combine(root, workshopId))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<string> GetLocalModRoots() =>
+        new[]
+            {
+                Path.Combine(settings.DataDirectory, "mods"),
+                Path.Combine(settings.InstallDirectory, "mods")
+            }
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    private ModEntry? MergeModInfoFile(Dictionary<string, ModEntry> entriesById,
+        List<ModEntry> itemEntries, string workshopId, string infoFile,
+        HashSet<string> previouslyEnabled)
+    {
+        try
+        {
+            var text = ConfigFileEncoding.ReadText(infoFile, "Auto");
+            var modId = ModInfoValue(text, "id");
+            if (string.IsNullOrWhiteSpace(modId)) return null;
+            var modName = ModInfoValue(text, "name");
+            var entryKey = modId;
+            if (entriesById.TryGetValue(modId, out var existingSource) &&
+                !string.Equals(existingSource.WorkshopId, workshopId,
+                    StringComparison.OrdinalIgnoreCase))
+                entryKey = $"\0source:{workshopId}:{modId}";
+            if (!entriesById.TryGetValue(entryKey, out var entry))
+            {
+                entry = new ModEntry
+                {
+                    WorkshopId = workshopId,
+                    WorkshopTitle = string.IsNullOrWhiteSpace(workshopId) ? "本機模組" :
+                        workshopTitles.GetValueOrDefault(workshopId, $"Workshop {workshopId}"),
+                    ModName = string.IsNullOrWhiteSpace(modName) ? modId : modName,
+                    ModId = modId,
+                    Variant = Build42VariantLabel(infoFile, text),
+                    Enabled = previouslyEnabled.Contains(modId),
+                    SourceFile = infoFile,
+                    IsLocalOnly = string.IsNullOrWhiteSpace(workshopId),
+                    DuplicateSource = entryKey != modId,
+                    SelectionPolicy = entryKey == modId ? "可獨立選擇" :
+                        $"相同 Mod ID 已由 {existingSource?.DisplayWorkshopId ?? "其他來源"} 提供",
+                    Status = entryKey == modId ? "可用" : "重複 Mod ID；此來源不重複啟用"
+                };
+                InspectModRuntime(entry);
+                entriesById[entryKey] = entry;
+                itemEntries.Add(entry);
+            }
+            MergeDistinct(entry.Requires, SplitModInfoList(ModInfoValue(text, "require")));
+            MergeDistinct(entry.LoadBefore, SplitModInfoList(ModInfoValue(text, "loadBefore")));
+            MergeDistinct(entry.LoadBefore, SplitModInfoList(ModInfoValue(text, "loadModBefore")));
+            MergeDistinct(entry.LoadAfter, SplitModInfoList(ModInfoValue(text, "loadAfter")));
+            MergeDistinct(entry.LoadAfter, SplitModInfoList(ModInfoValue(text, "loadModAfter")));
+            MergeDistinct(entry.MapFolders, FindMapFolders(infoFile));
+            return entry;
+        }
+        catch (Exception ex)
+        {
+            Log($"讀取 {infoFile} 失敗：{ex.Message}");
+            return null;
+        }
+    }
+
+    private List<string> LinkUnresolvedInstalledMods(HashSet<string> unresolvedIds,
+        HashSet<string> previouslyEnabled, Dictionary<string, ModEntry> entriesById)
+    {
+        var inferredWorkshopIds = new List<string>();
+        foreach (var contentRoot in GetWorkshopContentRoots().Where(Directory.Exists))
+        {
+            IEnumerable<string> itemDirectories;
+            try { itemDirectories = Directory.EnumerateDirectories(contentRoot).ToList(); }
+            catch (Exception ex) { Log($"無法掃描 Workshop 目錄 {contentRoot}：{ex.Message}"); continue; }
+            foreach (var itemDirectory in itemDirectories)
+            {
+                var workshopId = Path.GetFileName(itemDirectory);
+                if (!ulong.TryParse(workshopId, out _)) continue;
+                List<string> infoFiles;
+                try
+                {
+                    infoFiles = SelectBuild42ModInfoFiles(Directory.EnumerateFiles(
+                        itemDirectory, "mod.info", SearchOption.AllDirectories));
+                }
+                catch (Exception ex) { Log($"無法反查 Workshop {workshopId}：{ex.Message}"); continue; }
+                var itemEntries = new List<ModEntry>();
+                foreach (var infoFile in infoFiles)
+                {
+                    string modId;
+                    try { modId = ModInfoValue(ConfigFileEncoding.ReadText(infoFile, "Auto"), "id"); }
+                    catch { continue; }
+                    if (!unresolvedIds.Contains(modId)) continue;
+                    var entry = MergeModInfoFile(entriesById, itemEntries, workshopId,
+                        infoFile, previouslyEnabled);
+                    if (entry == null) continue;
+                    entry.InferredWorkshopLink = true;
+                    unresolvedIds.Remove(entry.ModId);
+                    if (!inferredWorkshopIds.Contains(workshopId, StringComparer.OrdinalIgnoreCase))
+                        inferredWorkshopIds.Add(workshopId);
+                }
+                MarkMutuallyExclusiveAlternatives(itemEntries);
+                if (unresolvedIds.Count == 0) break;
+            }
+            if (unresolvedIds.Count == 0) break;
+        }
+
+        foreach (var localRoot in GetLocalModRoots().Where(Directory.Exists))
+        {
+            List<string> infoFiles;
+            try
+            {
+                infoFiles = SelectBuild42ModInfoFiles(Directory.EnumerateFiles(
+                    localRoot, "mod.info", SearchOption.AllDirectories));
+            }
+            catch (Exception ex) { Log($"無法掃描本機 Mods 目錄 {localRoot}：{ex.Message}"); continue; }
+            var localEntries = new List<ModEntry>();
+            foreach (var infoFile in infoFiles)
+            {
+                string modId;
+                try { modId = ModInfoValue(ConfigFileEncoding.ReadText(infoFile, "Auto"), "id"); }
+                catch { continue; }
+                if (!unresolvedIds.Contains(modId)) continue;
+                var entry = MergeModInfoFile(entriesById, localEntries, "", infoFile,
+                    previouslyEnabled);
+                if (entry == null) continue;
+                entry.IsLocalOnly = true;
+                unresolvedIds.Remove(entry.ModId);
+            }
+            MarkMutuallyExclusiveAlternatives(localEntries);
+            if (unresolvedIds.Count == 0) break;
+        }
+        return inferredWorkshopIds;
     }
 
     private static void MarkMutuallyExclusiveAlternatives(List<ModEntry> entries)
@@ -2758,17 +3349,24 @@ SandboxVars = {
 
     private void UpdateModEntryDiagnostics()
     {
-        var known = resolvedModEntries.Select(entry => entry.ModId)
+        var known = resolvedModEntries.Where(entry => entry.CanEnable).Select(entry => entry.ModId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var enabled = resolvedModEntries.Where(entry => entry.Enabled)
+        var enabled = resolvedModEntries.Where(entry => entry.Enabled && entry.CanEnable)
             .Select(entry => entry.ModId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var groupCounts = resolvedModEntries.Where(entry => entry.WorkshopId.Length > 0)
+        var groupCounts = resolvedModEntries.Where(entry => entry.WorkshopId.Length > 0 && entry.CanEnable)
             .GroupBy(entry => entry.WorkshopId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
         var requiredByOthers = resolvedModEntries.SelectMany(entry => entry.Requires)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in resolvedModEntries)
         {
+            if (!entry.CanEnable)
+            {
+                entry.Enabled = false;
+                entry.Dependencies = "—";
+                entry.Ordering = "—";
+                continue;
+            }
             var missing = entry.Requires.Where(id => !known.Contains(id)).ToList();
             var inactive = entry.Requires.Where(id => known.Contains(id) && !enabled.Contains(id)).ToList();
             var missingOrderTargets = entry.LoadAfter.Concat(entry.LoadBefore)
@@ -2790,6 +3388,14 @@ SandboxVars = {
                 entry.Status = "依賴尚未勾選：" + string.Join(", ", inactive);
             else if (entry.Enabled && enabledExclusive.Count > 0)
                 entry.Status = "互斥選項不可同時啟用：" + string.Join(", ", enabledExclusive);
+            else if (string.IsNullOrWhiteSpace(entry.SourceFile))
+                entry.Status = "目前找不到 mod.info；保留既有 Mods 值";
+            else if (entry.IsLocalOnly)
+                entry.Status = "本機模組／無 Workshop ID";
+            else if (entry.InferredWorkshopLink)
+                entry.Status = "已從本機反查 Workshop ID；待儲存";
+            else if (entry.HasOrderingCycle)
+                entry.Status = "偵測到循環依賴／排序規則；保留原相對順序";
             else if (entry.ModId.Equals("BetterGeneratorInfo", StringComparison.OrdinalIgnoreCase))
                 entry.Status = "作者要求 DoLuaChecksum=false；不建議啟用";
             else if (missingOrderTargets.Count > 0)
@@ -2819,13 +3425,54 @@ SandboxVars = {
 
     private void RefreshModGrid()
     {
+        var selected = ResolvedModsGrid.SelectedItem as ModEntry;
         for (var i = 0; i < resolvedModEntries.Count; i++)
             resolvedModEntries[i].Order = i + 1;
         ResolvedModsGrid.ItemsSource = null;
-        ResolvedModsGrid.ItemsSource = resolvedModEntries;
-        var enabled = resolvedModEntries.Count(entry => entry.Enabled);
+        var enabled = resolvedModEntries.Count(entry => entry.Enabled && entry.CanEnable);
         var warnings = resolvedModEntries.Count(entry => entry.Status != "可用");
-        ResolvedModsText.Text = $"共 {resolvedModEntries.Count} 個 Mod ID；已勾選 {enabled}；需確認 {warnings}";
+        ResolvedModsText.Text = $"共 {resolvedModEntries.Count} 個清單項目；已啟用 {enabled}；需確認 {warnings}";
+        ApplyModFilter();
+        if (selected != null && ResolvedModsGrid.Items.Contains(selected))
+            ResolvedModsGrid.SelectedItem = selected;
+    }
+
+    private void ModEnabledCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { DataContext: ModEntry entry } checkBox || !entry.CanEnable)
+            return;
+        entry.Enabled = checkBox.IsChecked == true;
+        var disabledDependents = entry.Enabled
+            ? new List<string>()
+            : DisableDependentMods(new[] { entry.ModId }, entry);
+        UpdateModEntryDiagnostics();
+        RefreshModGrid();
+        RefreshMapCandidates(true);
+        SetConfigDirty(true);
+        if (disabledDependents.Count > 0)
+            ResolvedModsText.Text = $"已停用 {entry.ModId}；連帶停用：{string.Join(", ", disabledDependents)}";
+    }
+
+    private List<string> DisableDependentMods(IEnumerable<string> unavailableIds,
+        ModEntry? excludedEntry = null)
+    {
+        var unavailable = unavailableIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var disabled = new List<string>();
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var candidate in resolvedModEntries.Where(candidate =>
+                         candidate.Enabled && candidate.CanEnable &&
+                         !ReferenceEquals(candidate, excludedEntry)))
+            {
+                if (!candidate.Requires.Any(unavailable.Contains)) continue;
+                candidate.Enabled = false;
+                if (unavailable.Add(candidate.ModId)) disabled.Add(candidate.ModId);
+                changed = true;
+            }
+        }
+        return disabled;
     }
 
     private void RefreshMapCandidates(bool preservePendingChoices)
@@ -2839,28 +3486,31 @@ SandboxVars = {
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         var currentSet = currentMaps.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var existingSpawnMaps = ReadExistingSpawnRegionMaps();
-        var enabledModIds = resolvedModEntries.Where(entry => entry.Enabled)
+        var enabledModIds = resolvedModEntries.Where(entry => entry.Enabled && entry.CanEnable)
             .Select(entry => entry.ModId).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         resolvedMapEntries.Clear();
-        foreach (var mod in resolvedModEntries)
+        foreach (var mod in resolvedModEntries.Where(mod => mod.CanEnable))
         {
             foreach (var mapFolder in mod.MapFolders)
             {
                 var key = $"{mod.WorkshopId}|{mod.ModId}|{mapFolder}";
                 var spawnFile = FindSpawnPointsFile(mod.SourceFile, mapFolder);
                 var hasSpawn = spawnFile.Length > 0;
+                var sourceEnabled = enabledModIds.Contains(mod.ModId);
                 previous.TryGetValue(key, out var pending);
+                var mapEnabled = sourceEnabled &&
+                    (pending?.Enabled ?? currentSet.Contains(mapFolder));
                 resolvedMapEntries.Add(new MapEntry
                 {
-                    Enabled = pending?.Enabled ?? currentSet.Contains(mapFolder),
+                    Enabled = mapEnabled,
                     MapFolder = mapFolder,
                     ModId = mod.ModId,
                     WorkshopId = mod.WorkshopId,
-                    SpawnEnabled = hasSpawn &&
+                    SpawnEnabled = mapEnabled && hasSpawn &&
                         (pending?.SpawnEnabled ?? existingSpawnMaps.Contains(mapFolder)),
                     SpawnPointsFile = hasSpawn ? spawnFile : "",
-                    Status = !enabledModIds.Contains(mod.ModId)
+                    Status = !sourceEnabled
                         ? "來源 Mod 尚未勾選"
                         : hasSpawn ? "可加入重生選單" : "僅地圖；無 spawnpoints.lua"
                 });
@@ -2925,6 +3575,7 @@ SandboxVars = {
         RefreshMapGrid();
         MapCandidatesGrid.SelectedItem = entry;
         MapCandidatesGrid.ScrollIntoView(entry);
+        SetConfigDirty(true);
     }
 
     private void ApplyMapSelections_Click(object sender, RoutedEventArgs e) =>
@@ -2949,6 +3600,7 @@ SandboxVars = {
             .Distinct(StringComparer.OrdinalIgnoreCase));
         settings.MapFolders = MapFoldersBox.Text;
         spawnRegionSelectionTouched = true;
+        SetConfigDirty(true);
         if (showMessage)
             MessageBox.Show(
                 $"已套用地圖順序；選擇 {resolvedMapEntries.Count(entry => entry.SpawnEnabled)} 個重生區域。\n" +
@@ -2959,7 +3611,7 @@ SandboxVars = {
 
     private bool ValidateMapSelections(bool showMessage)
     {
-        var enabledModIds = resolvedModEntries.Where(entry => entry.Enabled)
+        var enabledModIds = resolvedModEntries.Where(entry => entry.Enabled && entry.CanEnable)
             .Select(entry => entry.ModId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var invalidMaps = resolvedMapEntries.Where(entry =>
             entry.Enabled && !enabledModIds.Contains(entry.ModId)).Select(entry => entry.MapFolder).ToList();
@@ -2986,6 +3638,172 @@ SandboxVars = {
     private void MoveModUp_Click(object sender, RoutedEventArgs e) => MoveSelectedMod(-1);
     private void MoveModDown_Click(object sender, RoutedEventArgs e) => MoveSelectedMod(1);
 
+    private void RemoveSelectedWorkshop_Click(object sender, RoutedEventArgs e)
+    {
+        ResolvedModsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+        ResolvedModsGrid.CommitEdit(DataGridEditingUnit.Row, true);
+        if (ResolvedModsGrid.SelectedItem is not ModEntry selected)
+        {
+            MessageBox.Show("請先選取要移出的項目。", "尚未選取項目");
+            return;
+        }
+
+        if (!selected.HasWorkshopId)
+        {
+            var localStillProvided = resolvedModEntries.Any(entry =>
+                !ReferenceEquals(entry, selected) &&
+                string.Equals(entry.ModId, selected.ModId, StringComparison.OrdinalIgnoreCase));
+            var localDependents = PreviewDependentMods(localStillProvided
+                    ? Array.Empty<string>() : new[] { selected.ModId },
+                new[] { selected });
+            if (MessageBox.Show(
+                    $"要從此伺服器的待套用 Mods 清單移出 {selected.ModId} 嗎？\n\n" +
+                    (localDependents.Count > 0
+                        ? "將連帶停用：" + string.Join(", ", localDependents) + "\n\n"
+                        : "") +
+                    "只會移除管理清單與相關地圖，不會刪除本機檔案。",
+                    "移出本機模組", MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+            var disabled = RemoveLocalModEntry(selected);
+            ResolvedModsText.Text = disabled.Count == 0
+                ? $"已移出本機 Mod {selected.ModId}；尚未寫入 INI。"
+                : $"已移出 {selected.ModId}；連帶停用：{string.Join(", ", disabled)}";
+            return;
+        }
+
+        var workshopId = selected.WorkshopId;
+        var affectedEntries = resolvedModEntries.Where(entry =>
+            string.Equals(entry.WorkshopId, workshopId, StringComparison.OrdinalIgnoreCase)).ToList();
+        var remainingSourceIds = resolvedModEntries.Except(affectedEntries)
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.ModId)).Select(entry => entry.ModId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unavailableIds = affectedEntries.Where(entry => !string.IsNullOrWhiteSpace(entry.ModId))
+            .Select(entry => entry.ModId).Where(id => !remainingSourceIds.Contains(id));
+        var affectedDependents = PreviewDependentMods(unavailableIds, affectedEntries);
+        if (MessageBox.Show(
+                $"要將 Workshop {workshopId} 移出此伺服器嗎？\n\n" +
+                $"會同步移除其 {affectedEntries.Count} 個清單項目、相關地圖與重生點。\n" +
+                (affectedDependents.Count > 0
+                    ? "將連帶停用：" + string.Join(", ", affectedDependents) + "\n"
+                    : "沒有其他已啟用 Mod 會被連帶停用。\n") +
+                "本機已下載檔案不會刪除；按下「儲存全部設定」前也不會修改 INI。",
+                "移出伺服器", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        var disabledDependents = RemoveManagedWorkshop(workshopId);
+        ResolvedModsText.Text = disabledDependents.Count == 0
+            ? $"已將 Workshop {workshopId} 移出待儲存清單；本機檔案仍保留。"
+            : $"已移出 Workshop {workshopId}，並停用相依 Mod：{string.Join(", ", disabledDependents)}";
+    }
+
+    private List<string> RemoveManagedWorkshop(string workshopId)
+    {
+        var enabledBefore = resolvedModEntries.Where(entry => entry.Enabled && entry.CanEnable)
+            .Select(entry => entry.ModId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var removedEntries = resolvedModEntries.Where(entry =>
+            string.Equals(entry.WorkshopId, workshopId, StringComparison.OrdinalIgnoreCase)).ToList();
+        var removedModIds = removedEntries.Where(entry => !string.IsNullOrWhiteSpace(entry.ModId))
+            .Select(entry => entry.ModId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var remainingEntries = resolvedModEntries.Except(removedEntries).ToList();
+        var stillProvided = remainingEntries.Where(entry => !string.IsNullOrWhiteSpace(entry.ModId))
+            .Select(entry => entry.ModId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unavailable = removedModIds.Where(id => !stillProvided.Contains(id)).ToList();
+
+        var removedMapFolders = removedEntries.SelectMany(entry => entry.MapFolders)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var remainingMapFolders = remainingEntries.SelectMany(entry => entry.MapFolders)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        removedMapFolders.ExceptWith(remainingMapFolders);
+
+        managedWorkshopIds.RemoveAll(id =>
+            string.Equals(id, workshopId, StringComparison.OrdinalIgnoreCase));
+        resolvedModEntries.RemoveAll(entry =>
+            string.Equals(entry.WorkshopId, workshopId, StringComparison.OrdinalIgnoreCase));
+        var disabledDependents = DisableDependentMods(unavailable);
+        var desiredEnabledIds = enabledBefore.Where(stillProvided.Contains)
+            .Except(disabledDependents, StringComparer.OrdinalIgnoreCase).ToList();
+        settings.WorkshopItems = ManagedWorkshopItems();
+        resolvedWorkshopIdentity = settings.WorkshopItems;
+        settings.Mods = string.Join(';', desiredEnabledIds);
+        ModsBox.Text = settings.Mods;
+
+        if (removedMapFolders.Count > 0)
+        {
+            var maps = NormalizeSemicolonList(MapFoldersBox.Text)
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(map => !removedMapFolders.Contains(map)).ToList();
+            if (!maps.Contains("Muldraugh, KY", StringComparer.OrdinalIgnoreCase))
+                maps.Add("Muldraugh, KY");
+            settings.MapFolders = string.Join(';', maps.Distinct(StringComparer.OrdinalIgnoreCase));
+            MapFoldersBox.Text = settings.MapFolders;
+            spawnRegionSelectionTouched = true;
+        }
+
+        FindInstalledModEntries(managedWorkshopIds, false);
+        SetConfigDirty(true);
+        return disabledDependents;
+    }
+
+    private List<string> RemoveLocalModEntry(ModEntry entry)
+    {
+        var enabledBefore = resolvedModEntries.Where(item => item.Enabled && item.CanEnable)
+            .Select(item => item.ModId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var removedMapFolders = entry.MapFolders.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var remainingEntries = resolvedModEntries.Where(other => !ReferenceEquals(other, entry)).ToList();
+        var sharedMapFolders = remainingEntries
+            .SelectMany(other => other.MapFolders).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        removedMapFolders.ExceptWith(sharedMapFolders);
+        resolvedModEntries.Remove(entry);
+        var stillProvided = remainingEntries.Where(item => !string.IsNullOrWhiteSpace(item.ModId))
+            .Select(item => item.ModId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unavailable = stillProvided.Contains(entry.ModId)
+            ? Array.Empty<string>() : new[] { entry.ModId };
+        var disabledDependents = DisableDependentMods(unavailable);
+        var desiredEnabledIds = enabledBefore.Where(stillProvided.Contains)
+            .Except(disabledDependents, StringComparer.OrdinalIgnoreCase).ToList();
+        settings.Mods = string.Join(';', desiredEnabledIds);
+        ModsBox.Text = settings.Mods;
+        if (removedMapFolders.Count > 0)
+        {
+            var maps = NormalizeSemicolonList(MapFoldersBox.Text)
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(map => !removedMapFolders.Contains(map)).ToList();
+            if (!maps.Contains("Muldraugh, KY", StringComparer.OrdinalIgnoreCase))
+                maps.Add("Muldraugh, KY");
+            settings.MapFolders = string.Join(';', maps.Distinct(StringComparer.OrdinalIgnoreCase));
+            MapFoldersBox.Text = settings.MapFolders;
+            spawnRegionSelectionTouched = true;
+        }
+        FindInstalledModEntries(managedWorkshopIds, false);
+        SetConfigDirty(true);
+        return disabledDependents;
+    }
+
+    private List<string> PreviewDependentMods(IEnumerable<string> unavailableIds,
+        IEnumerable<ModEntry> excludedEntries)
+    {
+        var unavailable = unavailableIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var excluded = excludedEntries.ToHashSet();
+        var affected = new List<string>();
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var candidate in resolvedModEntries.Where(candidate =>
+                         candidate.Enabled && candidate.CanEnable && !excluded.Contains(candidate)))
+            {
+                if (!candidate.Requires.Any(unavailable.Contains) ||
+                    affected.Contains(candidate.ModId, StringComparer.OrdinalIgnoreCase)) continue;
+                affected.Add(candidate.ModId);
+                unavailable.Add(candidate.ModId);
+                changed = true;
+            }
+        }
+        return affected;
+    }
+
     private void MoveSelectedMod(int direction)
     {
         ResolvedModsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
@@ -2998,23 +3816,29 @@ SandboxVars = {
         RefreshModGrid();
         ResolvedModsGrid.SelectedItem = entry;
         ResolvedModsGrid.ScrollIntoView(entry);
+        RefreshMapCandidates(true);
+        SetConfigDirty(true);
     }
 
     private void SortModsByDependencies_Click(object sender, RoutedEventArgs e)
     {
         SortModEntriesByDependencies();
+        SetConfigDirty(true);
         MessageBox.Show("已依 mod.info 的 require、loadBefore/loadAfter 與 loadModBefore/loadModAfter 排序。\n" +
             "循環依賴會保留原本相對順序；尚未寫入 PZ INI。", "依賴排序完成");
     }
 
     private void SortModEntriesByDependencies()
     {
-        var byId = resolvedModEntries.ToDictionary(entry => entry.ModId,
+        var placeholders = resolvedModEntries.Where(entry => !entry.CanEnable).ToList();
+        var sortable = resolvedModEntries.Where(entry => entry.CanEnable).ToList();
+        foreach (var entry in sortable) entry.HasOrderingCycle = false;
+        var byId = sortable.ToDictionary(entry => entry.ModId,
             StringComparer.OrdinalIgnoreCase);
-        var edges = resolvedModEntries.ToDictionary(entry => entry.ModId,
+        var edges = sortable.ToDictionary(entry => entry.ModId,
             _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             StringComparer.OrdinalIgnoreCase);
-        var indegree = resolvedModEntries.ToDictionary(entry => entry.ModId, _ => 0,
+        var indegree = sortable.ToDictionary(entry => entry.ModId, _ => 0,
             StringComparer.OrdinalIgnoreCase);
         void AddEdge(string before, string after)
         {
@@ -3022,13 +3846,13 @@ SandboxVars = {
                 string.Equals(before, after, StringComparison.OrdinalIgnoreCase)) return;
             if (edges[before].Add(after)) indegree[after]++;
         }
-        foreach (var entry in resolvedModEntries)
+        foreach (var entry in sortable)
         {
             foreach (var dependency in entry.Requires.Concat(entry.LoadAfter))
                 AddEdge(dependency, entry.ModId);
             foreach (var target in entry.LoadBefore) AddEdge(entry.ModId, target);
         }
-        var originalIndex = resolvedModEntries.Select((entry, index) => (entry.ModId, index))
+        var originalIndex = sortable.Select((entry, index) => (entry.ModId, index))
             .ToDictionary(item => item.ModId, item => item.index, StringComparer.OrdinalIgnoreCase);
         var ready = indegree.Where(pair => pair.Value == 0).Select(pair => pair.Key)
             .OrderBy(id => originalIndex[id]).ToList();
@@ -3047,8 +3871,12 @@ SandboxVars = {
                 }
             }
         }
-        foreach (var entry in resolvedModEntries.Where(entry => !sorted.Contains(entry)))
+        foreach (var entry in sortable.Where(entry => !sorted.Contains(entry)))
+        {
+            entry.HasOrderingCycle = true;
             sorted.Add(entry);
+        }
+        sorted.AddRange(placeholders);
         resolvedModEntries.Clear();
         resolvedModEntries.AddRange(sorted);
         UpdateModEntryDiagnostics();
@@ -3056,8 +3884,10 @@ SandboxVars = {
         RefreshMapCandidates(true);
     }
 
-    private void ApplySelectedMods_Click(object sender, RoutedEventArgs e) =>
-        ApplyResolvedMods(true, true);
+    private void ApplySelectedMods_Click(object sender, RoutedEventArgs e)
+    {
+        if (ApplyResolvedMods(true, true)) SetConfigDirty(true);
+    }
 
     private bool ApplyResolvedMods(bool showSuccessMessage, bool showErrorMessage)
     {
@@ -3065,7 +3895,7 @@ SandboxVars = {
         ResolvedModsGrid.CommitEdit(DataGridEditingUnit.Row, true);
         UpdateModEntryDiagnostics();
         RefreshModGrid();
-        var enabled = resolvedModEntries.Where(entry => entry.Enabled).ToList();
+        var enabled = resolvedModEntries.Where(entry => entry.Enabled && entry.CanEnable).ToList();
         var enabledIds = enabled.Select(entry => entry.ModId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missing = enabled.SelectMany(entry => entry.Requires.Select(required => (entry, required)))
@@ -3105,6 +3935,7 @@ SandboxVars = {
         ModsBox.Text = mods;
         settings.Mods = mods;
         RefreshMapCandidates(true);
+        if (!ApplyMapSelections(false)) return false;
         ResolvedModsText.Text = $"待儲存：{enabled.Count} 個 Mod；Map={settings.MapFolders}";
         if (showSuccessMessage) MessageBox.Show(
             $"已套用 {enabled.Count} 個 Mod ID。\n" +
@@ -3218,14 +4049,15 @@ SandboxVars = {
     {
         if (ServerListBox.SelectedItem is not ExistingServer server)
         {
+            inspectedRows.Clear();
             SettingsGrid.ItemsSource = null;
             return;
         }
-        var rows = new List<ConfigValueRow>();
-        rows.AddRange(ParseIniForInspection(server.IniPath));
-        if (File.Exists(server.SandboxPath)) rows.AddRange(ParseLuaForInspection(server.SandboxPath));
-        SettingsGrid.ItemsSource = rows;
-        ScanSummaryText.Text = $"{server.Name}：共 {rows.Count} 個設定；自訂 {rows.Count(x => x.Status == "已修改")}";
+        inspectedRows.Clear();
+        inspectedRows.AddRange(ParseIniForInspection(server.IniPath));
+        if (File.Exists(server.SandboxPath)) inspectedRows.AddRange(ParseLuaForInspection(server.SandboxPath));
+        ApplySettingsFilter();
+        ScanSummaryText.Text = $"{server.Name}：共 {inspectedRows.Count} 個設定；自訂 {inspectedRows.Count(x => x.Status == "已修改")}";
     }
 
     private void UseSelectedServer_Click(object sender, RoutedEventArgs e)
@@ -3264,9 +4096,8 @@ SandboxVars = {
     private void ResetAllDefaults_Click(object sender, RoutedEventArgs e)
     {
         SettingsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
-        if (SettingsGrid.ItemsSource is not IEnumerable<ConfigValueRow> source) return;
         var count = 0;
-        foreach (var row in source.Where(x => x.CanReset))
+        foreach (var row in inspectedRows.Where(x => x.CanReset))
         {
             row.CurrentValue = row.DefaultValue;
             row.Status = "待恢復";
@@ -3279,9 +4110,8 @@ SandboxVars = {
     private void SaveInspectedValues_Click(object sender, RoutedEventArgs e)
     {
         SettingsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
-        if (ServerListBox.SelectedItem is not ExistingServer server ||
-            SettingsGrid.ItemsSource is not IEnumerable<ConfigValueRow> rows) return;
-        var changedRows = rows.Where(row =>
+        if (ServerListBox.SelectedItem is not ExistingServer server) return;
+        var changedRows = inspectedRows.Where(row =>
             !string.Equals(row.CurrentValue, row.OriginalValue, StringComparison.Ordinal)).ToList();
         if (changedRows.Count == 0) { MessageBox.Show("目前沒有待套用的設定變更。"); return; }
         var invalidRows = changedRows.Where(row =>
@@ -3329,32 +4159,24 @@ SandboxVars = {
 
     private static string ReplaceIniValue(string text, string key, string value)
     {
-        var pattern = $@"(?m)^({System.Text.RegularExpressions.Regex.Escape(key)}=).*$";
+        var pattern = $@"(?m)^({System.Text.RegularExpressions.Regex.Escape(key)}=)[^\r\n]*";
         return new System.Text.RegularExpressions.Regex(pattern)
             .Replace(text, $"${{1}}{value}", 1);
     }
 
     private static string ReplaceLuaWholeLineValue(string text, string key, string value, string? section)
-    {
-        var start = 0; var end = text.Length;
-        if (section != null)
-        {
-            start = text.IndexOf(section + " = {", StringComparison.Ordinal);
-            if (start < 0) return text;
-            end = FindLuaSectionEnd(text, text.IndexOf('{', start));
-        }
-        var segment = text[start..end];
-        var pattern = $@"(?m)^(\s*{System.Text.RegularExpressions.Regex.Escape(key)}\s*=\s*).*(,\s*)$";
-        var regex = new System.Text.RegularExpressions.Regex(pattern);
-        var replaced = regex.Replace(segment,
-            match => match.Groups[1].Value + value + match.Groups[2].Value, 1);
-        return text[..start] + replaced + text[end..];
-    }
+        => ReplaceLuaValue(text, key, value, section, false);
 
     private IEnumerable<ConfigValueRow> ParseIniForInspection(string path)
+        => ParseIniLines(ConfigFileEncoding.ReadAllLines(path, SelectedEncodingMode()));
+
+    private IEnumerable<ConfigValueRow> ParseIniTextForInspection(string text)
+        => ParseIniLines(SplitConfigLines(text));
+
+    private IEnumerable<ConfigValueRow> ParseIniLines(IEnumerable<string> sourceLines)
     {
         var comments = new List<string>();
-        foreach (var raw in ConfigFileEncoding.ReadAllLines(path, SelectedEncodingMode()))
+        foreach (var raw in sourceLines)
         {
             var line = raw.Trim();
             if (line.StartsWith('#') || line.StartsWith(';'))
@@ -3371,26 +4193,33 @@ SandboxVars = {
             var defaultValue = fallback ??
                 (B42Defaults.TryGetValue(key, out var known) ? known : "遊戲未註明");
             var commentRange = ExtractCommentRange(comments);
+            var commentOptions = ExtractCommentOptions(comments);
             var range = commentRange.Display.Length > 0 ? commentRange :
                 B42Ranges.TryGetValue(key, out var knownRange)
                     ? (knownRange.Min, knownRange.Max, knownRange.Display)
-                    : (null, null, "未註明");
+                    : (null, null, commentOptions.Length > 0 ? commentOptions : "未註明");
             var source = fallback != null || commentRange.Display.Length > 0
                 ? "目前設定檔註記"
                 : B42Defaults.ContainsKey(key) || B42Ranges.ContainsKey(key)
                     ? "內建 B42 參考"
                     : "遊戲未註明";
             yield return MakeInspectionRow("伺服器 INI", key, current, defaultValue,
-                range.Item3, source, range.Item1, range.Item2);
+                range.Item3, source, range.Item1, range.Item2, string.Join(" ", comments));
             comments.Clear();
         }
     }
 
     private IEnumerable<ConfigValueRow> ParseLuaForInspection(string path)
+        => ParseLuaLines(ConfigFileEncoding.ReadAllLines(path, SelectedEncodingMode()));
+
+    private IEnumerable<ConfigValueRow> ParseLuaTextForInspection(string text)
+        => ParseLuaLines(SplitConfigLines(text));
+
+    private IEnumerable<ConfigValueRow> ParseLuaLines(IEnumerable<string> sourceLines)
     {
         var comments = new List<string>();
         var sections = new Stack<string>();
-        foreach (var raw in ConfigFileEncoding.ReadAllLines(path, SelectedEncodingMode()))
+        foreach (var raw in sourceLines)
         {
             var line = raw.Trim();
             if (line.StartsWith("--"))
@@ -3422,11 +4251,12 @@ SandboxVars = {
                 (B42Defaults.TryGetValue(fullKey, out var nested) ? nested :
                     B42Defaults.TryGetValue(key, out var known) ? known : "遊戲未註明");
             var commentRange = ExtractCommentRange(comments);
+            var commentOptions = ExtractCommentOptions(comments);
             var range = commentRange.Display.Length > 0 ? commentRange :
                 B42Ranges.TryGetValue(fullKey, out var nestedRange) ? nestedRange :
                 B42Ranges.TryGetValue(key, out var knownRange)
                     ? knownRange
-                    : (null, null, "未註明");
+                    : (null, null, commentOptions.Length > 0 ? commentOptions : "未註明");
             var source = fallback != null || commentRange.Display.Length > 0
                 ? "目前設定檔註記"
                 : B42Defaults.ContainsKey(fullKey) || B42Defaults.ContainsKey(key) ||
@@ -3434,20 +4264,55 @@ SandboxVars = {
                     ? "內建 B42 參考"
                     : "遊戲未註明";
             yield return MakeInspectionRow(sections.Count > 0 ? sections.Peek() : "沙盒世界",
-                fullKey, current, defaultValue, range.Item3, source, range.Item1, range.Item2);
+                fullKey, current, defaultValue, range.Item3, source, range.Item1, range.Item2,
+                string.Join(" ", comments));
             comments.Clear();
         }
     }
 
     private static string? ExtractCommentDefault(IEnumerable<string> comments)
     {
-        foreach (var comment in comments.Reverse())
+        var materialized = comments.ToList();
+        foreach (var comment in materialized.AsEnumerable().Reverse())
         {
             var match = System.Text.RegularExpressions.Regex.Match(comment,
                 @"(?:預設|Default)\s*[=:]\s*([^\r\n]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (match.Success) return match.Groups[1].Value.Trim().TrimEnd('.', '。');
+            if (!match.Success) continue;
+            var rawDefault = match.Groups[1].Value.Trim().TrimEnd('.', '。');
+            if (System.Text.RegularExpressions.Regex.IsMatch(rawDefault,
+                    @"^(true|false|-?\d+(?:\.\d+)?|"".*"")$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return rawDefault;
+            foreach (var optionComment in materialized)
+            {
+                var option = System.Text.RegularExpressions.Regex.Match(optionComment,
+                    @"^(\d+)\s*=\s*(.+)$");
+                if (!option.Success) continue;
+                var label = option.Groups[2].Value.Trim().TrimEnd('.', '。');
+                if (string.Equals(label, rawDefault, StringComparison.OrdinalIgnoreCase) ||
+                    label.StartsWith(rawDefault + " ", StringComparison.OrdinalIgnoreCase) ||
+                    rawDefault.StartsWith(label + " ", StringComparison.OrdinalIgnoreCase))
+                    return option.Groups[1].Value;
+            }
+            return rawDefault;
         }
         return null;
+    }
+
+    private static string ExtractCommentOptions(IEnumerable<string> comments)
+    {
+        var options = comments.Select(comment => System.Text.RegularExpressions.Regex.Match(comment,
+                @"^(\d+)\s*=\s*(.+)$"))
+            .Where(match => match.Success)
+            .Select(match => $"{match.Groups[1].Value}={match.Groups[2].Value.Trim()}")
+            .ToList();
+        return options.Count == 0 ? "" : string.Join("；", options);
+    }
+
+    private static IEnumerable<string> SplitConfigLines(string text)
+    {
+        using var reader = new StringReader(text ?? "");
+        while (reader.ReadLine() is { } line) yield return line;
     }
 
     private static (double? Min, double? Max, string Display) ExtractCommentRange(IEnumerable<string> comments)
@@ -3467,7 +4332,8 @@ SandboxVars = {
     }
 
     private static ConfigValueRow MakeInspectionRow(string category, string key, string current,
-        string defaultValue, string allowedRange, string source, double? minimum, double? maximum)
+        string defaultValue, string allowedRange, string source, double? minimum, double? maximum,
+        string notes)
     {
         var comparable = defaultValue != "遊戲未註明" &&
             System.Text.RegularExpressions.Regex.IsMatch(defaultValue, @"^(true|false|-?\d+(?:\.\d+)?)$",
@@ -3477,6 +4343,7 @@ SandboxVars = {
         return new ConfigValueRow {
             Category = category, Key = key, CurrentValue = current, OriginalValue = current,
             DefaultValue = defaultValue, AllowedRange = allowedRange, MetadataSource = source,
+            Notes = notes,
             MinimumValue = minimum, MaximumValue = maximum,
             Status = !comparable ? "供參考" : same ? "預設" : "已修改", CanReset = comparable
         };
@@ -3512,8 +4379,135 @@ SandboxVars = {
             Log($"讀取 {Path.GetFileName(sandbox)}：{loaded.Encoding.WebName}，儲存時保持相同編碼。");
         }
         else RawSandboxBox.Text = "";
+        RefreshFeaturedSettingEditors();
         if (File.Exists(ini) || File.Exists(sandbox)) CaptureConfigState();
         Log($"已載入 {name} 的原始設定檔。");
+    }
+
+    private void RefreshFeaturedSettingEditors()
+    {
+        featuredIniRows.Clear();
+        featuredSandboxRows.Clear();
+        if (!string.IsNullOrWhiteSpace(RawIniBox.Text))
+            featuredIniRows.AddRange(ParseIniTextForInspection(RawIniBox.Text)
+                .Where(row => row.Key.StartsWith("AntiCheat", StringComparison.OrdinalIgnoreCase)));
+        if (!string.IsNullOrWhiteSpace(RawSandboxBox.Text))
+            featuredSandboxRows.AddRange(ParseLuaTextForInspection(RawSandboxBox.Text)
+                .Where(row => !FixedSandboxKeys.Contains(row.Key) &&
+                    (IsFeaturedWorldRow(row) || IsFeaturedPlayerRow(row) || IsFeaturedZombieRow(row) ||
+                     IsModSandboxRow(row))));
+
+        foreach (var row in featuredIniRows.Concat(featuredSandboxRows))
+            ConfigSettingLocalization.Apply(row);
+
+        var world = featuredSandboxRows.Where(IsFeaturedWorldRow).ToList();
+        var player = featuredSandboxRows.Where(IsFeaturedPlayerRow).ToList();
+        var zombie = featuredSandboxRows.Where(IsFeaturedZombieRow).ToList();
+        var mods = featuredSandboxRows.Where(IsModSandboxRow).ToList();
+        WorldDetailsGrid.ItemsSource = world;
+        PlayerDetailsGrid.ItemsSource = player;
+        ZombieDetailsGrid.ItemsSource = zombie;
+        AntiCheatDetailsGrid.ItemsSource = featuredIniRows;
+        ModSandboxDetailsGrid.ItemsSource = mods;
+        LocalizationService.SetFormattedText(WorldDetailsSummaryText, "其他重點世界設定：{0} 項", world.Count);
+        LocalizationService.SetFormattedText(PlayerDetailsSummaryText, "其他重點玩家設定：{0} 項", player.Count);
+        LocalizationService.SetFormattedText(ZombieDetailsSummaryText, "其他重點殭屍設定：{0} 項", zombie.Count);
+        LocalizationService.SetFormattedText(AntiCheatDetailsSummaryText, "Build 42 反作弊設定：{0} 項",
+            featuredIniRows.Count);
+        LocalizationService.SetFormattedText(ModSandboxDetailsSummaryText, "模組／其他 Sandbox 區段：{0} 項",
+            mods.Count);
+    }
+
+    private void RefreshFeaturedRowLocalization()
+    {
+        if (featuredIniRows.Count == 0 && featuredSandboxRows.Count == 0) return;
+        foreach (var row in featuredIniRows.Concat(featuredSandboxRows))
+            ConfigSettingLocalization.Apply(row);
+        WorldDetailsGrid.Items.Refresh();
+        PlayerDetailsGrid.Items.Refresh();
+        ZombieDetailsGrid.Items.Refresh();
+        AntiCheatDetailsGrid.Items.Refresh();
+        ModSandboxDetailsGrid.Items.Refresh();
+    }
+
+    private static bool IsFeaturedWorldRow(ConfigValueRow row) => FeaturedWorldKeys.Contains(row.Key);
+
+    private static bool IsFeaturedPlayerRow(ConfigValueRow row) =>
+        FeaturedPlayerKeys.Contains(row.Key) ||
+        (row.Key.StartsWith("MultiplierConfig.", StringComparison.OrdinalIgnoreCase) &&
+         !row.Key.Equals("MultiplierConfig.Global", StringComparison.OrdinalIgnoreCase) &&
+         !row.Key.Equals("MultiplierConfig.GlobalToggle", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFeaturedZombieRow(ConfigValueRow row) =>
+        FeaturedZombieRootKeys.Contains(row.Key) ||
+        row.Key.StartsWith("ZombieLore.", StringComparison.OrdinalIgnoreCase) ||
+        row.Key.StartsWith("ZombieConfig.", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsModSandboxRow(ConfigValueRow row) =>
+        row.Category is not ("沙盒世界" or "Map" or "ZombieLore" or "ZombieConfig" or
+            "MultiplierConfig" or "Basement");
+
+    private void ResetFeaturedDefault_Click(object sender, RoutedEventArgs e)
+    {
+        var grid = (sender as FrameworkElement)?.Tag?.ToString() switch
+        {
+            "World" => WorldDetailsGrid,
+            "Player" => PlayerDetailsGrid,
+            "Zombie" => ZombieDetailsGrid,
+            "AntiCheat" => AntiCheatDetailsGrid,
+            "Mod" => ModSandboxDetailsGrid,
+            _ => null
+        };
+        if (grid?.SelectedItem is not ConfigValueRow row)
+        {
+            MessageBox.Show("請先選擇一個設定列。");
+            return;
+        }
+        if (!row.CanReset)
+        {
+            MessageBox.Show("目前 Build 42 設定檔沒有提供可可靠轉換的預設值，管理器不會猜測覆寫。");
+            return;
+        }
+        row.CurrentValue = row.DefaultValue;
+        row.Status = "待恢復";
+        grid.Items.Refresh();
+        SetConfigDirty(true);
+    }
+
+    private bool CommitAndValidateFeaturedSettings(out List<ConfigValueRow> changedRows)
+    {
+        foreach (var grid in new[] { WorldDetailsGrid, PlayerDetailsGrid, ZombieDetailsGrid,
+                     AntiCheatDetailsGrid, ModSandboxDetailsGrid })
+        {
+            grid.CommitEdit(DataGridEditingUnit.Cell, true);
+            grid.CommitEdit(DataGridEditingUnit.Row, true);
+        }
+        changedRows = featuredIniRows.Concat(featuredSandboxRows)
+            .Distinct()
+            .Where(row => !string.Equals(row.CurrentValue, row.OriginalValue, StringComparison.Ordinal))
+            .ToList();
+        var invalid = new List<string>();
+        foreach (var row in changedRows)
+        {
+            if (row.CurrentValue.Contains('\r') || row.CurrentValue.Contains('\n'))
+            {
+                invalid.Add($"{row.Key}：不可包含換行");
+                continue;
+            }
+            if (row.MinimumValue.HasValue && row.MaximumValue.HasValue &&
+                (!TryParseFlexibleDouble(row.CurrentValue, out var number) ||
+                 number < row.MinimumValue.Value || number > row.MaximumValue.Value))
+                invalid.Add($"{row.Key}：{row.CurrentValue}（允許 {row.AllowedRange}）");
+            else if (bool.TryParse(row.OriginalValue, out _) && !bool.TryParse(row.CurrentValue, out _))
+                invalid.Add($"{row.Key}：必須是 true 或 false");
+            else if (TryParseFlexibleDouble(row.OriginalValue, out _) &&
+                     !TryParseFlexibleDouble(row.CurrentValue, out _))
+                invalid.Add($"{row.Key}：必須是數字");
+        }
+        if (invalid.Count == 0) return true;
+        MessageBox.Show("以下重點設定值無效，未寫入：\n\n" + string.Join("\n", invalid.Take(20)),
+            "設定格式錯誤", MessageBoxButton.OK, MessageBoxImage.Warning);
+        return false;
     }
 
     private void SaveRaw_Click(object sender, RoutedEventArgs e) => RunExplicitConfigWrite(SaveRawCore);
@@ -3526,37 +4520,64 @@ SandboxVars = {
             return;
         }
         if (!CanWriteConfiguration()) return;
+        if (!string.IsNullOrWhiteSpace(RawSandboxBox.Text))
+        {
+            if (!RawSandboxBox.Text.Contains("SandboxVars", StringComparison.Ordinal) ||
+                !IsBuild42StableSandbox(RawSandboxBox.Text))
+            {
+                MessageBox.Show("SandboxVars 必須包含 SandboxVars 表格，以及目前 Build 42 VERSION = 6。");
+                return;
+            }
+            if (!ValidateLuaStructure(RawSandboxBox.Text, out var validationError))
+            {
+                MessageBox.Show($"SandboxVars.lua 結構驗證失敗，原檔不會被修改：\n{validationError}",
+                    "拒絕寫入", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+        }
+        var snapshots = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
         try
         {
             EnsureExplicitConfigWriteAuthorized();
             var serverDir = Path.Combine(DataPathBox.Text.Trim(), "Server");
             var name = ServerNameBox.Text.Trim();
             Directory.CreateDirectory(serverDir);
+            var iniPath = Path.Combine(serverDir, name + ".ini");
+            var sandboxPath = Path.Combine(serverDir, name + "_SandboxVars.lua");
+            snapshots[iniPath] = File.Exists(iniPath) ? File.ReadAllBytes(iniPath) : null;
+            snapshots[sandboxPath] = File.Exists(sandboxPath) ? File.ReadAllBytes(sandboxPath) : null;
             if (!string.IsNullOrWhiteSpace(RawIniBox.Text))
-                ConfigFileEncoding.WritePreservingEncoding(
-                    Path.Combine(serverDir, name + ".ini"), RawIniBox.Text, SelectedEncodingMode());
+            {
+                ConfigFileEncoding.WritePreservingEncoding(iniPath, RawIniBox.Text, SelectedEncodingMode());
+                VerifyWrittenText(iniPath, RawIniBox.Text);
+            }
             if (!string.IsNullOrWhiteSpace(RawSandboxBox.Text))
             {
-                if (!RawSandboxBox.Text.Contains("SandboxVars", StringComparison.Ordinal) ||
-                    !IsBuild42StableSandbox(RawSandboxBox.Text))
-                {
-                    MessageBox.Show("SandboxVars 必須包含 SandboxVars 表格，以及目前 Build 42 VERSION = 6。");
-                    return;
-                }
-                if (!ValidateLuaStructure(RawSandboxBox.Text, out var validationError))
-                {
-                    MessageBox.Show($"SandboxVars.lua 結構驗證失敗，原檔不會被修改：\n{validationError}",
-                        "拒絕寫入", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-                ConfigFileEncoding.WritePreservingEncoding(
-                    Path.Combine(serverDir, name + "_SandboxVars.lua"), RawSandboxBox.Text, SelectedEncodingMode());
+                ConfigFileEncoding.WritePreservingEncoding(sandboxPath, RawSandboxBox.Text, SelectedEncodingMode());
+                VerifyWrittenText(sandboxPath, RawSandboxBox.Text);
             }
             CaptureConfigState();
+            SetConfigDirty(false);
             Log("已儲存原始 INI 與 SandboxVars.lua。");
             MessageBox.Show("原始設定檔已儲存。");
         }
-        catch (Exception ex) { MessageBox.Show(ex.Message, "儲存失敗"); }
+        catch (Exception ex)
+        {
+            foreach (var snapshot in snapshots)
+            {
+                try
+                {
+                    if (snapshot.Value == null)
+                    {
+                        if (File.Exists(snapshot.Key)) File.Delete(snapshot.Key);
+                    }
+                    else File.WriteAllBytes(snapshot.Key, snapshot.Value);
+                }
+                catch (Exception rollbackEx) { Log($"原始設定回復失敗：{rollbackEx.Message}"); }
+            }
+            SetConfigDirty(true);
+            MessageBox.Show($"{ex.Message}\n\n已嘗試回復兩個設定檔的寫入前內容。", "儲存失敗");
+        }
     }
 
     private static bool ValidateLuaStructure(string text, out string error)
@@ -3653,6 +4674,7 @@ SandboxVars = {
         settings.InstallDirectory = InstallPathBox.Text.Trim();
         settings.DataDirectory = requestedDataDirectory;
         settings.ServerName = requestedServerName;
+        modModelHasPendingRepair = false;
         LoadRawFiles();
         if (string.IsNullOrWhiteSpace(RawIniBox.Text) && string.IsNullOrWhiteSpace(RawSandboxBox.Text))
         {
@@ -3691,7 +4713,8 @@ SandboxVars = {
         settings.SaveEveryMinutes = IniInt(RawIniBox.Text, "SaveWorldEveryMinutes", defaults.SaveEveryMinutes);
         settings.BuiltInBackups = IniInt(RawIniBox.Text, "BackupsCount", defaults.BuiltInBackups);
         settings.SpawnItems = IniString(RawIniBox.Text, "SpawnItems", defaults.SpawnItems);
-        settings.WelcomeMessage = IniString(RawIniBox.Text, "ServerWelcomeMessage", defaults.WelcomeMessage);
+        settings.WelcomeMessage = StripManagedRestartWelcomeSuffix(
+            IniString(RawIniBox.Text, "ServerWelcomeMessage", defaults.WelcomeMessage));
         settings.WorkshopItems = IniString(RawIniBox.Text, "WorkshopItems", defaults.WorkshopItems);
         settings.Mods = IniString(RawIniBox.Text, "Mods", defaults.Mods);
         settings.MapFolders = IniString(RawIniBox.Text, "Map", defaults.MapFolders);
@@ -3749,6 +4772,7 @@ SandboxVars = {
         }
         SettingsToUi();
         CaptureConfigState();
+        SetConfigDirty(modModelHasPendingRepair);
         Log("已先讀取現有 INI 與 Build 42 SandboxVars；現在可以安全修改。");
         if (!silent) MessageBox.Show("已從目前 INI 與 Build 42 SandboxVars 讀入 GUI。");
         return true;
@@ -3826,6 +4850,7 @@ SandboxVars = {
         nextRestart = settings.AutoRestart && !automationRuntimeSuspended &&
             serverProcess is { HasExited: false }
             ? DateTime.Now.AddHours(settings.RestartHours) : null;
+        if (nextRestart.HasValue) welcomeRestartTimestamp = nextRestart;
         UpdateNextRestartText();
     }
 
@@ -4367,16 +5392,14 @@ SandboxVars = {
         OnlinePlayersListBox.ItemsSource = players;
         if (players.Count > 0)
             LocalizationService.SetFormattedText(OnlinePlayerSummaryText,
-                "在線 {0} 人 • {1} • {2}", players.Count, source, DateTime.Now.ToString("HH:mm"));
+                "在線玩家：{0}", players.Count);
         else if (reportedCount > 0)
             LocalizationService.SetFormattedText(OnlinePlayerSummaryText,
-                "在線 {0} 人（名稱未能解析）• {1}", reportedCount, source);
+                "在線玩家：{0}（名稱未能解析）", reportedCount);
         else if (reportedCount == 0)
-            LocalizationService.SetFormattedText(OnlinePlayerSummaryText,
-                "目前無玩家 • {0} • {1}", source, DateTime.Now.ToString("HH:mm"));
+            LocalizationService.SetText(OnlinePlayerSummaryText, "在線玩家：0");
         else
-            LocalizationService.SetFormattedText(OnlinePlayerSummaryText,
-                "無法確認在線人數 • {0} • {1}", source, DateTime.Now.ToString("HH:mm"));
+            LocalizationService.SetText(OnlinePlayerSummaryText, "在線玩家：未知");
         Log(verifiedCount is null
             ? $"在線玩家查詢沒有完整回應（{source}）；不會據此自動重啟。"
             : $"在線玩家已更新：{verifiedCount.Value} 人（{source}）。");
@@ -4427,7 +5450,7 @@ SandboxVars = {
 
     private void About_Click(object sender, RoutedEventArgs e)
     {
-        new AboutWindow { Owner = this }.ShowDialog();
+        new AboutWindow(updateCheckTask) { Owner = this }.ShowDialog();
     }
 
     private void UpdateNextRestartText()
@@ -4437,6 +5460,7 @@ SandboxVars = {
         else
             LocalizationService.SetFormattedText(NextRestartText,
                 "下次重啟：{0}", nextRestart.Value.ToString("yyyy/MM/dd HH:mm:ss"));
+        UpdateScheduleOverview();
     }
 
     private void SetStatus(string text, string color)
@@ -4448,6 +5472,7 @@ SandboxVars = {
     private void Log(string text)
     {
         pendingLogLines.Enqueue($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}");
+        if (settings.EnableManagerLog) ManagerLogService.Write(text);
     }
 
     private void FlushPendingLogs()
@@ -4465,13 +5490,326 @@ SandboxVars = {
             ConsoleBox.Text = newline >= 0 ? ConsoleBox.Text[(newline + 1)..] : ConsoleBox.Text[^150_000..];
             ConsoleBox.CaretIndex = ConsoleBox.Text.Length;
         }
-        ConsoleBox.ScrollToEnd();
+        if (!pauseConsoleScroll) ConsoleBox.ScrollToEnd();
+    }
+
+    private static async Task<GitHubReleaseInfo?> SafeManagerUpdateCheckAsync()
+    {
+        try { return await GitHubUpdateService.CheckForUpdateAsync(); }
+        catch (Exception ex)
+        {
+            ManagerLogService.Write($"GitHub 版本檢查失敗：{ex.Message}");
+            return null;
+        }
+    }
+
+    private void ConfigControlChanged(object sender, RoutedEventArgs e)
+    {
+        if (!uiInitialized || suppressDirtyTracking || IsNonConfigControl(e.OriginalSource)) return;
+        SetConfigDirty(true);
+    }
+
+    private bool IsNonConfigControl(object? source)
+    {
+        return source is DependencyObject element &&
+            (IsDescendantOf(element, SettingSearchBox) || IsDescendantOf(element, ModSearchBox) ||
+             IsDescendantOf(element, WorkshopBox) ||
+             IsDescendantOf(element, ManagerLogSearchBox) || IsDescendantOf(element, CommandBox) ||
+             IsDescendantOf(element, ConsoleBox) || IsDescendantOf(element, UiLanguageCombo) ||
+             IsDescendantOf(element, UiFontCombo) || IsDescendantOf(element, ConfigEncodingCombo) ||
+             IsDescendantOf(element, LogRetentionDaysBox) ||
+             IsDescendantOf(element, SettingFilterCombo) || IsDescendantOf(element, ModFilterCombo));
+    }
+
+    private static bool IsDescendantOf(DependencyObject element, DependencyObject ancestor)
+    {
+        for (DependencyObject? current = element; current != null;)
+        {
+            if (ReferenceEquals(current, ancestor)) return true;
+            try
+            {
+                current = current is FrameworkContentElement content ? content.Parent :
+                    VisualTreeHelper.GetParent(current);
+            }
+            catch { return false; }
+        }
+        return false;
+    }
+
+    private void SetConfigDirty(bool dirty)
+    {
+        configDirty = dirty;
+        if (UnsavedChangesText == null) return;
+        UnsavedChangesText.Text = dirty ? "有尚未儲存的變更" : "已儲存";
+        UnsavedChangesText.Foreground = new SolidColorBrush(dirty
+            ? Color.FromRgb(225, 168, 75) : Color.FromRgb(130, 148, 157));
+    }
+
+    private void CreateProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ProfileDialog(DataPathBox.Text.Trim(), false) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        try
+        {
+            ServerProfileService.CreateBuild42Defaults(dialog.DataDirectory, dialog.ProfileName);
+            DataPathBox.Text = dialog.DataDirectory;
+            ServerNameBox.Text = dialog.ProfileName;
+            ScanExistingServers();
+            SelectProfile(dialog.DataDirectory, dialog.ProfileName);
+            ShowSelectedServerValues();
+            SetConfigDirty(false);
+            MessageBox.Show("已建立乾淨的 Build 42 Stable VERSION=6 設定檔。\n未帶入目前 GUI、名稱、密碼、MOD 或世界資料。",
+                "建立完成", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "無法建立設定檔", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void CopyProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (ServerListBox.SelectedItem is not ExistingServer source)
+        {
+            MessageBox.Show("請先選擇要複製的設定檔。", "尚未選擇設定檔");
+            return;
+        }
+        var dialog = new ProfileDialog(source.DataDirectory, true) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        try
+        {
+            ServerProfileService.CopyAndRename(dialog.DataDirectory, source.Name,
+                dialog.ProfileName, dialog.ClearSecrets, dialog.AdjustPorts);
+            DataPathBox.Text = dialog.DataDirectory;
+            ServerNameBox.Text = dialog.ProfileName;
+            ScanExistingServers();
+            SelectProfile(dialog.DataDirectory, dialog.ProfileName);
+            ShowSelectedServerValues();
+            SetConfigDirty(false);
+            MessageBox.Show("設定檔已複製並重新命名；ResetID 已更新。\n世界、地圖區塊、角色與玩家資料未複製。\n\n連接埠沿用來源，若兩個伺服器要同時執行，請先修改連接埠。",
+                "複製完成", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "無法複製設定檔", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void SelectProfile(string dataDirectory, string profileName)
+    {
+        if (ServerListBox.ItemsSource is not IEnumerable<ExistingServer> servers) return;
+        ServerListBox.SelectedItem = servers.FirstOrDefault(item =>
+            item.Name.Equals(profileName, StringComparison.OrdinalIgnoreCase) &&
+            item.DataDirectory.Equals(dataDirectory, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void SettingSearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplySettingsFilter();
+    private void SettingFilterCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => ApplySettingsFilter();
+
+    private void ApplySettingsFilter()
+    {
+        if (SettingsGrid == null) return;
+        var query = SettingSearchBox?.Text.Trim() ?? "";
+        var filter = (SettingFilterCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
+        var visible = inspectedRows.Where(row =>
+            (query.Length == 0 || (row.Category + " " + row.Key + " " + row.CurrentValue + " " +
+                row.DefaultValue + " " + row.AllowedRange + " " + row.MetadataSource + " " + row.Notes)
+                .Contains(query, StringComparison.CurrentCultureIgnoreCase)) &&
+            (filter == "All" ||
+             filter == "Changed" && row.Status == "已修改" ||
+             filter == "Pending" && (row.Status == "待恢復" || row.CurrentValue != row.OriginalValue) ||
+             filter == "Unknown" && !row.CanReset ||
+             filter == "Invalid" && IsInspectionValueInvalid(row))).ToList();
+        SettingsGrid.ItemsSource = visible;
+        if (SettingsFilterSummaryText != null)
+            SettingsFilterSummaryText.Text = $"顯示 {visible.Count} / {inspectedRows.Count}";
+    }
+
+    private static bool IsInspectionValueInvalid(ConfigValueRow row) =>
+        row.MinimumValue.HasValue && row.MaximumValue.HasValue &&
+        (!TryParseFlexibleDouble(row.CurrentValue, out var value) ||
+         value < row.MinimumValue.Value || value > row.MaximumValue.Value);
+
+    private async void ResolveNewMods_Click(object sender, RoutedEventArgs e) =>
+        await ResolveModsAsync(false);
+
+    private void ModSearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyModFilter();
+    private void ModFilterCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => ApplyModFilter();
+
+    private void ApplyModFilter()
+    {
+        if (ResolvedModsGrid == null) return;
+        var query = ModSearchBox?.Text.Trim() ?? "";
+        var filter = (ModFilterCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
+        var visible = resolvedModEntries.Where(entry =>
+            (query.Length == 0 || (entry.WorkshopId + " " + entry.WorkshopTitle + " " + entry.ModId + " " +
+                entry.ModName + " " + entry.Category + " " + entry.Status + " " + entry.Dependencies + " " +
+                string.Join(' ', entry.MapFolders)).Contains(query, StringComparison.CurrentCultureIgnoreCase)) &&
+             (filter == "All" || filter == "Enabled" && entry.Enabled && entry.CanEnable ||
+              filter == "Disabled" && !entry.Enabled || filter == "Warnings" && entry.Status != "可用" ||
+             filter == "Maps" && entry.MapFolders.Count > 0 ||
+             filter == "Dependencies" && entry.Requires.Count > 0)).ToList();
+        ResolvedModsGrid.ItemsSource = visible;
+        ResolvedModsText.Text = $"顯示 {visible.Count} / {resolvedModEntries.Count}；已啟用 {resolvedModEntries.Count(x => x.Enabled && x.CanEnable)}";
+    }
+
+    private void SelectVisibleMods_Click(object sender, RoutedEventArgs e)
+    {
+        if (ResolvedModsGrid.ItemsSource is not IEnumerable<ModEntry> visible) return;
+        foreach (var entry in visible.Where(entry => entry.CanEnable)) entry.Enabled = true;
+        RefreshModGrid();
+        SetConfigDirty(true);
+    }
+
+    private void ClearVisibleMods_Click(object sender, RoutedEventArgs e)
+    {
+        if (ResolvedModsGrid.ItemsSource is not IEnumerable<ModEntry> visibleSource) return;
+        var visible = visibleSource.ToList();
+        if (visible.Any(entry => entry.Enabled && (entry.MapFolders.Count > 0 ||
+                resolvedModEntries.Any(other => other.Enabled && other.Requires.Contains(entry.ModId,
+                    StringComparer.OrdinalIgnoreCase)))) &&
+            MessageBox.Show("目前結果包含地圖或其他已啟用模組的依賴。取消後，套用時會同步移除 Mods／Map，並再次檢查依賴。確定繼續？",
+                "確認取消模組", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        foreach (var entry in visible) entry.Enabled = false;
+        RefreshModGrid();
+        SetConfigDirty(true);
+    }
+
+    private void RunEnvironmentCheck_Click(object sender, RoutedEventArgs e)
+        => RefreshEnvironmentCheck(true);
+
+    private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, MainTabs) ||
+            !ReferenceEquals(MainTabs.SelectedItem, DiagnosticsTab)) return;
+        RefreshEnvironmentCheck(false);
+    }
+
+    private void RefreshEnvironmentCheck(bool writeLog)
+    {
+        var snapshot = new ServerSettings
+        {
+            SteamCmdPath = SteamCmdPathBox.Text.Trim(), InstallDirectory = InstallPathBox.Text.Trim(),
+            DataDirectory = DataPathBox.Text.Trim(), ServerName = ServerNameBox.Text.Trim(),
+            ConfigEncoding = ConfigEncodingCombo.SelectedValue?.ToString() ?? settings.ConfigEncoding,
+            DefaultPort = int.TryParse(PortBox.Text, out var port) ? port : -1,
+            UDPPort = int.TryParse(UdpPortBox.Text, out var udp) ? udp : -1,
+            MemoryGb = int.TryParse(MemoryBox.Text, out var memory) ? memory : -1
+        };
+        var rows = EnvironmentInspection.Run(snapshot);
+        EnvironmentCheckGrid.ItemsSource = rows;
+        DiagnosticsStatusText.Text = rows.Any(row => row.Status == "錯誤")
+            ? "環境預檢完成：有錯誤，請先修正紅色／錯誤項目。"
+            : rows.Any(row => row.Status == "警告") ? "環境預檢完成：有警告。" : "環境預檢全部通過。";
+        if (writeLog) Log("已執行環境預檢。" );
+    }
+
+    private void OpenManagerLogs_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ManagerLogService.Initialize(settings.ManagerLogRetentionDays);
+            Process.Start(new ProcessStartInfo("explorer.exe", ManagerLogService.LogDirectory)
+                { UseShellExecute = true });
+        }
+        catch (Exception ex) { DiagnosticsStatusText.Text = $"無法開啟記錄資料夾：{ex.Message}"; }
+    }
+
+    private void ReloadManagerLog_Click(object sender, RoutedEventArgs e)
+    {
+        managerLogViewerLines.Clear();
+        var latest = ManagerLogService.RecentFiles(1).FirstOrDefault();
+        if (latest != null)
+        {
+            try { managerLogViewerLines.AddRange(File.ReadAllLines(latest)); }
+            catch (Exception ex) { DiagnosticsStatusText.Text = $"讀取記錄失敗：{ex.Message}"; }
+        }
+        ApplyManagerLogFilter();
+    }
+
+    private void ManagerLogSearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyManagerLogFilter();
+
+    private void ApplyManagerLogFilter()
+    {
+        if (ManagerLogViewer == null) return;
+        var query = ManagerLogSearchBox?.Text.Trim() ?? "";
+        ManagerLogViewer.Text = string.Join(Environment.NewLine, managerLogViewerLines.Where(line =>
+            query.Length == 0 || line.Contains(query, StringComparison.CurrentCultureIgnoreCase)));
+    }
+
+    private void ToggleConsoleScroll_Click(object sender, RoutedEventArgs e)
+    {
+        pauseConsoleScroll = !pauseConsoleScroll;
+        ConsoleScrollButton.Content = pauseConsoleScroll ? "恢復控制台自動捲動" : "暫停控制台自動捲動";
+    }
+
+    private void ExportDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        var preview = DiagnosticBundleService.Preview(settings);
+        if (MessageBox.Show(preview + "\n\n確定匯出？", "診斷包內容預覽",
+            MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes) return;
+        try
+        {
+            var path = DiagnosticBundleService.Export(settings, AppVersion);
+            DiagnosticsStatusText.Text = $"診斷包已匯出：{path}";
+            Log("已匯出隱私清理診斷包。" );
+        }
+        catch (Exception ex) { DiagnosticsStatusText.Text = $"診斷包匯出失敗：{ex.Message}"; }
+    }
+
+    private void SaveLogSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(LogRetentionDaysBox.Text, out var days) || days is < 1 or > 365)
+        {
+            MessageBox.Show("記錄保留天數必須為 1–365。", "設定格式錯誤");
+            return;
+        }
+        settings.ManagerLogRetentionDays = days;
+        settings.EnableManagerLog = true;
+        ManagerLogService.Initialize(days);
+        ManagerLogPathText.Text = $"記錄位置：{ManagerLogService.LogDirectory}";
+        PersistSettings();
+        DiagnosticsStatusText.Text = $"GUI 記錄已啟用，保留 {days} 天。";
+    }
+
+    private string WelcomeMessageForServer(ServerSettings value)
+    {
+        var message = value.WelcomeMessage.Trim();
+        if (!value.ShowScheduledRestartInWelcome) return message;
+        if (value.AutoRestart && !nextRestart.HasValue && !welcomeRestartTimestamp.HasValue)
+            welcomeRestartTimestamp = DateTime.Now.AddHours(value.RestartHours);
+        DateTime? scheduled = value.AutoRestart ? nextRestart ?? welcomeRestartTimestamp : null;
+        var line = scheduled.HasValue
+            ? $"下次定時重啟：{scheduled.Value:yyyy/MM/dd HH:mm:ss}"
+            : "下次定時重啟：未排程";
+        return message.Length == 0 ? line : message + "<LINE>" + line;
+    }
+
+    private static string StripManagedRestartWelcomeSuffix(string message) =>
+        Regex.Replace(message,
+            @"(?:<LINE>)?下次定時重啟：(?:未排程|\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2})\s*$",
+            "", RegexOptions.CultureInvariant).TrimEnd();
+
+    private void UpdateScheduleOverview()
+    {
+        if (ScheduleRestartOverviewText == null) return;
+        ScheduleRestartOverviewText.Text = nextRestart.HasValue
+            ? $"定時重啟：{nextRestart.Value:yyyy/MM/dd HH:mm:ss}"
+            : "定時重啟：未排程";
+        SchedulePlayerOverviewText.Text = nextPlayerQuery.HasValue
+            ? $"玩家查詢：{nextPlayerQuery.Value:yyyy/MM/dd HH:mm:ss}"
+            : "玩家查詢：伺服器未啟動";
+        ScheduleWorkshopOverviewText.Text = nextWorkshopUpdateCheck.HasValue
+            ? $"Workshop 檢查：{nextWorkshopUpdateCheck.Value:yyyy/MM/dd HH:mm:ss}"
+            : "Workshop 檢查：未排程";
+        ScheduleLastResultText.Text = $"最近結果：{lastScheduleResult}";
     }
 
     private static string Bool(bool value) => value ? "true" : "false";
     private static string Clean(string value) => value.Replace("\r", " ").Replace("\n", " ");
     private static string NormalizeWorkshopList(string value) =>
-        string.Join(';', value.Split(new[] { ';', ',', '\r', '\n', ' ' }, StringSplitOptions.RemoveEmptyEntries));
+        string.Join(';', value.Split(new[] { ';', '；', ',', '\r', '\n', '\t', ' ' },
+            StringSplitOptions.RemoveEmptyEntries));
     private static string NormalizeSemicolonList(string value) =>
         string.Join(';', value.Split(new[] { ';', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(item => item.Trim()).Where(item => item.Length > 0));

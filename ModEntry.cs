@@ -3,6 +3,16 @@ namespace PZServerManager;
 public sealed class ModEntry
 {
     public bool Enabled { get; set; }
+    public bool CanEnable => !string.IsNullOrWhiteSpace(ModId) && !DuplicateSource;
+    public bool HasWorkshopId => ulong.TryParse(WorkshopId, out _);
+    public bool IsLocalOnly { get; set; }
+    public bool InferredWorkshopLink { get; set; }
+    public bool DuplicateSource { get; set; }
+    public bool HasOrderingCycle { get; set; }
+    public string DisplayWorkshopId => HasWorkshopId ? WorkshopId : "—";
+    public string DisplayModId => string.IsNullOrWhiteSpace(ModId) ? "—" : ModId;
+    public string SourceKind => HasWorkshopId ? "Steam Workshop" :
+        IsLocalOnly ? "本機模組" : "未解析來源";
     public int Order { get; set; }
     public string WorkshopId { get; set; } = "";
     public string WorkshopTitle { get; set; } = "";

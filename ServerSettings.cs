@@ -18,6 +18,9 @@ public sealed class ServerSettings
     public string SettingsStorage { get; set; } = "ExeDirectory";
     public string UiFontFamily { get; set; } = "NotoSansTC";
     public string UiLanguage { get; set; } = "zh-TW";
+    public bool CheckForManagerUpdates { get; set; } = true;
+    public bool EnableManagerLog { get; set; } = true;
+    public int ManagerLogRetentionDays { get; set; } = 14;
     public int DefaultPort { get; set; } = 16261;
     public int UDPPort { get; set; } = 16262;
     public int MaxPlayers { get; set; } = 32;
@@ -66,6 +69,7 @@ public sealed class ServerSettings
     public int BloodLevel { get; set; } = 3;
     public bool PlayerDamageFromCrash { get; set; } = true;
     public string WelcomeMessage { get; set; } = "";
+    public bool ShowScheduledRestartInWelcome { get; set; } = true;
     public string WorkshopItems { get; set; } = "";
     public string Mods { get; set; } = "";
     public string MapFolders { get; set; } = "Muldraugh, KY";

@@ -1,0 +1,36 @@
+<Window x:Class="PZServerManager.ProfileDialog"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="設定檔" Width="620" Height="375" ResizeMode="NoResize"
+ WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+ Icon="Assets/pz-server-manager.ico" Background="#101619" Foreground="#EAF0F2"
+ FontFamily="{DynamicResource AppUiFontFamily}">
+ <Grid Margin="22">
+  <Grid.RowDefinitions>
+   <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+   <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+   <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+  </Grid.RowDefinitions>
+  <TextBlock x:Name="HeadingText" Text="建立新設定檔" FontSize="23" FontWeight="SemiBold"
+   Foreground="#E1A84B" Margin="0,0,0,16"/>
+  <Grid Grid.Row="1">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="130"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <Label Content="資料目錄"/><TextBox x:Name="DataDirectoryBox" Grid.Column="1"/>
+   <Button Grid.Column="2" Content="選擇…" Click="Browse_Click"/>
+  </Grid>
+  <Grid Grid.Row="2">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="130"/><ColumnDefinition/></Grid.ColumnDefinitions>
+   <Label Content="新設定檔名稱"/><TextBox x:Name="ProfileNameBox" Grid.Column="1"/>
+  </Grid>
+  <CheckBox x:Name="ClearSecretsCheck" Grid.Row="3" Margin="5,8"
+   Content="複製時清除加入密碼與 RCON 密碼（建議）" IsChecked="True"/>
+  <CheckBox x:Name="AdjustPortsCheck" Grid.Row="4" Margin="5,4,5,8"
+   Content="複製時自動選擇未被其他設定檔使用的連接埠" IsChecked="True"/>
+  <TextBlock x:Name="HelpText" Grid.Row="5" Margin="5,10" Foreground="#AFC0C8"
+   TextWrapping="Wrap"/>
+  <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+   <Button Content="取消" IsCancel="True"/>
+   <Button Content="確定" IsDefault="True" Background="#8A641F" Click="Accept_Click"/>
+  </StackPanel>
+ </Grid>
+</Window>

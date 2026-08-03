@@ -173,6 +173,8 @@ internal static class LocalizationService
             run.Text = Translate(state.Text ?? "");
         }
         else if (node is TextBlock textBlock &&
+                 !System.Windows.Data.BindingOperations.IsDataBound(
+                     textBlock, TextBlock.TextProperty) &&
                  !textBlock.Inlines.OfType<LineBreak>().Any())
         {
             if (!state.HasText)

@@ -21,7 +21,11 @@ public sealed class ConfigValueRow
     public required string DefaultValue { get; init; }
     public required string AllowedRange { get; init; }
     public required string MetadataSource { get; init; }
+    public string Notes { get; init; } = "";
     public required string Status { get; set; }
+    public string DisplayName { get; set; } = "";
+    public string LocalizedAllowedRange { get; set; } = "";
+    public string LocalizedNotes { get; set; } = "";
     public bool CanReset { get; init; }
     public double? MinimumValue { get; init; }
     public double? MaximumValue { get; init; }

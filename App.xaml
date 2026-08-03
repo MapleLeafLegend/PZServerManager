@@ -58,6 +58,39 @@
        </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
+    <Style x:Key="CompactSettingsTabItem" TargetType="TabItem"
+           BasedOn="{StaticResource {x:Type TabItem}}">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Padding" Value="14,7"/>
+      <Setter Property="Margin" Value="1,0"/>
+    </Style>
+    <Style x:Key="DenseSettingsTabItem" TargetType="TabItem"
+           BasedOn="{StaticResource CompactSettingsTabItem}">
+      <Setter Property="Padding" Value="12,5"/>
+    </Style>
+    <Style x:Key="PrimaryTabItem" TargetType="TabItem"
+           BasedOn="{StaticResource {x:Type TabItem}}">
+      <Setter Property="FontSize" Value="15"/>
+      <Setter Property="Padding" Value="20,9"/>
+    </Style>
+    <Style x:Key="SettingsRailTabItem" TargetType="TabItem">
+      <Setter Property="Foreground" Value="#BFCED4"/>
+      <Setter Property="Background" Value="#182026"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Padding" Value="14,9"/>
+      <Setter Property="Margin" Value="0,1"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
+       <Border x:Name="RailChrome" Background="{TemplateBinding Background}" CornerRadius="6,0,0,6"
+        Padding="{TemplateBinding Padding}" BorderBrush="#354650" BorderThickness="1,1,0,1">
+        <ContentPresenter ContentSource="Header" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+       </Border>
+       <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="RailChrome" Property="Background" Value="#263841"/><Setter Property="Foreground" Value="White"/></Trigger>
+        <Trigger Property="IsSelected" Value="True"><Setter TargetName="RailChrome" Property="Background" Value="#8A641F"/><Setter TargetName="RailChrome" Property="BorderBrush" Value="#E1A84B"/><Setter Property="Foreground" Value="White"/></Trigger>
+       </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
     <Style TargetType="DataGridColumnHeader">
       <Setter Property="MinHeight" Value="32"/>
       <Setter Property="Padding" Value="10,7"/>

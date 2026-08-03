@@ -1,23 +1,31 @@
 <Window x:Class="PZServerManager.AboutWindow"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
- Title="關於此應用" Width="690" Height="650" ResizeMode="NoResize"
+ Title="關於此應用" Width="720" Height="720" ResizeMode="NoResize"
  WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
  Icon="Assets/pz-server-manager.ico"
  Background="#101619" Foreground="#EAF0F2" FontFamily="{DynamicResource AppUiFontFamily}">
  <Grid Margin="24">
   <Grid.RowDefinitions>
-   <RowDefinition Height="Auto"/>
-   <RowDefinition Height="Auto"/>
-   <RowDefinition Height="*"/>
-   <RowDefinition Height="Auto"/>
+   <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+   <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
   </Grid.RowDefinitions>
 
-  <Grid>
-   <Grid.ColumnDefinitions>
-    <ColumnDefinition Width="112"/>
-    <ColumnDefinition Width="*"/>
-   </Grid.ColumnDefinitions>
+  <Border Background="#182026" BorderBrush="#354650" BorderThickness="1"
+   CornerRadius="7" Padding="12,8" Margin="0,0,0,14" HorizontalAlignment="Stretch">
+   <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <Ellipse x:Name="UpdateStatusDot" Width="12" Height="12" Fill="#EAF0F2"
+     VerticalAlignment="Center" Margin="0,0,10,0"/>
+    <TextBlock x:Name="UpdateStatusText" Grid.Column="1" Text="目前版本狀態"
+     VerticalAlignment="Center" Foreground="#C7D5DB" TextWrapping="Wrap"/>
+    <Button x:Name="DownloadUpdateButton" Grid.Column="2" Content="下載最新版"
+     Visibility="Collapsed" Background="#8A3D38" Click="DownloadUpdate_Click"/>
+   </Grid>
+  </Border>
+
+  <Grid Grid.Row="1">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="112"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
    <Border Width="96" Height="96" Background="#182026" BorderBrush="#354650"
     BorderThickness="1" CornerRadius="12" Padding="8" HorizontalAlignment="Left">
     <Image Source="Assets/pz-server-manager-icon.png" Stretch="Uniform"/>
@@ -31,7 +39,7 @@
    </StackPanel>
   </Grid>
 
-  <Border Grid.Row="1" Background="#182026" BorderBrush="#354650" BorderThickness="1"
+  <Border Grid.Row="2" Background="#182026" BorderBrush="#354650" BorderThickness="1"
    CornerRadius="8" Padding="16" Margin="0,20,0,14">
    <Grid>
     <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -40,27 +48,25 @@
    </Grid>
   </Border>
 
-  <Border Grid.Row="2" Background="#182026" BorderBrush="#354650" BorderThickness="1"
+  <Border Grid.Row="3" Background="#182026" BorderBrush="#354650" BorderThickness="1"
    CornerRadius="8" Padding="18">
    <ScrollViewer VerticalScrollBarVisibility="Auto">
     <StackPanel>
-     <TextBlock Text="免責聲明" FontSize="18" FontWeight="Bold" Foreground="#E1A84B"
-      Margin="0,0,0,10"/>
+     <TextBlock Text="免責聲明" FontSize="18" FontWeight="Bold" Foreground="#E1A84B" Margin="0,0,0,10"/>
      <TextBlock x:Name="DisclaimerText" TextWrapping="Wrap" LineHeight="22" Foreground="#D8E3E7"><Run
-      Text="本程式是由 MapleLeaf 製作的非官方獨立管理工具，並非 The Indie Stone、Project Zomboid、Valve 或 Steam 的官方產品，也未獲其背書或保證。"/><LineBreak/><LineBreak/><Run
-      Text="Project Zomboid、Steam、SteamCMD 及其他商標、遊戲內容與服務之權利均屬各自權利人所有。"/><LineBreak/><LineBreak/><Run
-      Text="伺服器版本、設定格式、模組、Steam Workshop 項目與第三方網路服務可能隨時變更。使用者應在套用設定、更新伺服器、安裝模組或重建世界前自行建立可還原的完整備份。管理器產生的設定備份不能取代 VM 快照或離線備份。"/><LineBreak/><LineBreak/><Run
-      Text="本程式按現況提供，不保證適合任何特定用途，亦不保證完全無錯誤、不中斷或不造成設定衝突。因使用本程式、網路或 CDN 遭劫持、第三方內容被竄改、遊戲更新、模組錯誤或操作不當所產生的資料遺失、服務中斷、安全問題或其他損失，使用者應自行承擔風險。"/>
+      Text="本程式是由 MapleLeaf 建立的非官方獨立管理工具，並未受到 The Indie Stone、Project Zomboid、Valve 或 Steam 的認可或背書。"/><LineBreak/><LineBreak/><Run
+      Text="Project Zomboid、Steam、SteamCMD 與相關商標、服務及內容均屬其各自權利人所有。"/><LineBreak/><LineBreak/><Run
+      Text="管理器會操作伺服器設定、Steam Workshop 項目與世界備份。使用前請自行確認設定及備份；任何設定錯誤、模組衝突、資料遺失、服務中斷或第三方內容問題，均由使用者自行承擔風險。"/><LineBreak/><LineBreak/><Run
+      Text="SteamCMD 與伺服器檔案的下載來源以官方位址為準。若網路、DNS、代理、CDN 或第三方環境遭劫持、竄改或攔截，本程式及建立者不承擔因此造成的損害。更新下載只會保存 ZIP，不會自動覆蓋或執行新程式。"/>
      </TextBlock>
     </StackPanel>
    </ScrollViewer>
   </Border>
 
-  <Grid Grid.Row="3" Margin="0,16,0,0">
+  <Grid Grid.Row="4" Margin="0,16,0,0">
    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
    <TextBlock Text="© 2026 MapleLeaf" Foreground="#71808A" VerticalAlignment="Center"/>
-   <Button Grid.Column="1" Content="關閉" Width="110" IsDefault="True" Click="Close_Click"
-    Background="#8A641F"/>
+   <Button Grid.Column="1" Content="關閉" Width="110" IsDefault="True" Click="Close_Click" Background="#8A641F"/>
   </Grid>
  </Grid>
 </Window>

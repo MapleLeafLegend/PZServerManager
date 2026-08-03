@@ -22,6 +22,13 @@ public partial class App : Application
         base.OnStartup(e);
     }
 
+    protected override void OnExit(ExitEventArgs e)
+    {
+        try { ManagerLogService.ShutdownAsync().GetAwaiter().GetResult(); }
+        catch { }
+        base.OnExit(e);
+    }
+
     private static void HandleDispatcherException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         WriteCrashLog(e.Exception);

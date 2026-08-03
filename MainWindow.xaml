@@ -1,22 +1,23 @@
 <Window x:Class="PZServerManager.MainWindow"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
- Title="PZ Build 42 伺服器管理器" Width="1120" Height="760" MinWidth="920" MinHeight="620"
+ Title="PZ Build 42 伺服器管理器" Width="1440" Height="900" MinWidth="1100" MinHeight="720"
+ WindowStartupLocation="CenterScreen" WindowState="Maximized"
  Icon="Assets/pz-server-manager.ico"
  Background="#101619" Foreground="#EAF0F2" FontFamily="{DynamicResource AppUiFontFamily}">
  <Grid>
-  <Grid.RowDefinitions><RowDefinition Height="72"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
+   <Grid.RowDefinitions><RowDefinition Height="64"/><RowDefinition Height="*"/><RowDefinition Height="30"/></Grid.RowDefinitions>
   <Border Background="#182026" BorderBrush="#354650" BorderThickness="0,0,0,1">
    <Grid Margin="20,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
     <StackPanel Orientation="Horizontal">
-     <Image Source="Assets/pz-server-manager-icon.png" Width="54" Height="54" Stretch="Uniform"
+      <Image Source="Assets/pz-server-manager-icon.png" Width="46" Height="46" Stretch="Uniform"
       Margin="0,0,13,0" SnapsToDevicePixels="True"/>
      <StackPanel VerticalAlignment="Center">
-      <TextBlock Text="PROJECT ZOMBOID" Foreground="#E1A84B" FontWeight="Bold" FontSize="13"/>
+       <TextBlock Text="PROJECT ZOMBOID" Foreground="#E1A84B" FontWeight="Bold" FontSize="12"/>
       <StackPanel Orientation="Horizontal">
-       <TextBlock Text="BUILD 42 伺服器管理器" FontWeight="SemiBold" FontSize="25"/>
+        <TextBlock Text="BUILD 42 伺服器管理器" FontWeight="SemiBold" FontSize="23"/>
        <Border Background="#8A641F" CornerRadius="3" Padding="7,2" Margin="10,5,0,3">
-       <TextBlock x:Name="HeaderVersionText" Text="v1.9.6" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
+        <TextBlock x:Name="HeaderVersionText" Text="v2.0.0" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
        </Border>
       </StackPanel>
      </StackPanel>
@@ -29,7 +30,9 @@
     </StackPanel>
    </Grid>
   </Border>
-  <TabControl x:Name="MainTabs" Grid.Row="1" Margin="14" Background="#182026" BorderBrush="#354650" Foreground="White">
+   <TabControl x:Name="MainTabs" Grid.Row="1" Margin="8" Background="#182026" BorderBrush="#354650" Foreground="White"
+    SelectionChanged="MainTabs_SelectionChanged"
+    ItemContainerStyle="{StaticResource PrimaryTabItem}">
    <TabItem Header=" 儀表板 ">
      <Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <WrapPanel>
@@ -70,7 +73,7 @@
        <TextBox x:Name="ConsoleBox" IsReadOnly="True" FontFamily="Consolas" FontSize="13"
         TextWrapping="NoWrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
       </GroupBox>
-      <GroupBox Grid.Column="1" Header="當前在線玩家">
+      <GroupBox Grid.Column="1" Header="在線玩家">
        <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <TextBlock x:Name="OnlinePlayerSummaryText" Text="伺服器未啟動" Foreground="#AFC0C8" Margin="5"/>
         <ListBox x:Name="OnlinePlayersListBox" Grid.Row="1" Background="#11171B" Foreground="#EAF0F2" Margin="4"/>
@@ -143,24 +146,36 @@
         <CheckBox x:Name="PauseCheck" Content="無玩家時暫停世界（Build 42 斷線／快速重連環境不建議）"
          ToolTip="PauseEmpty=true 曾在 Build 42 斷線／快速重連情境伴隨主迴圈卡死；管理器只提示，不會擅自改寫官方預設。"/>
       </StackPanel></GroupBox>
-      <Button Content="儲存管理器設定並寫入伺服器 INI" Background="#8A641F" HorizontalAlignment="Right" Click="SaveConfig_Click"/>
      </StackPanel>
     </Grid></ScrollViewer>
    </TabItem>
-   <TabItem x:Name="ExistingServersTab" Header=" 現有伺服器 ">
-    <Grid Margin="12">
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-     <StackPanel Orientation="Horizontal">
-      <Button Content="掃描所有已知位置" Click="ScanServers_Click"/>
-      <Button Content="重新整理設定值" Click="RefreshServerValues_Click"/>
-      <Button Content="載入選取伺服器" Background="#8A641F" Click="UseSelectedServer_Click"/>
+   <TabItem x:Name="ExistingServersTab" Header=" 設定檔管理 ">
+     <Grid Margin="12">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <WrapPanel>
+       <Button Content="重新掃描設定檔" Click="ScanServers_Click"/>
+       <Button Content="新設定檔" Background="#297052" Click="CreateProfile_Click"/>
+       <Button Content="複製並重新命名" Click="CopyProfile_Click"/>
+       <Button Content="載入選取伺服器" Background="#8A641F" Click="UseSelectedServer_Click"/>
       <Button Content="恢復選取格預設" Click="ResetSelectedDefault_Click"/>
       <Button Content="全部返回預設" Background="#7A433A" Click="ResetAllDefaults_Click"/>
       <Button Content="儲存待套用值" Background="#297052" Click="SaveInspectedValues_Click"/>
       <TextBlock x:Name="ScanSummaryText" Text="尚未掃描" Margin="12,0" VerticalAlignment="Center" Foreground="#AFC0C8"/>
-     </StackPanel>
-     <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="8"/><ColumnDefinition/></Grid.ColumnDefinitions>
-      <GroupBox Header="找到的伺服器"><ListBox x:Name="ServerListBox" DisplayMemberPath="DisplayName"
+      </WrapPanel>
+      <Grid Grid.Row="1" Margin="0,4,0,7">
+       <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="190"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+       <TextBox x:Name="SettingSearchBox" ToolTip="搜尋設定鍵、分類、目前值或說明"
+        TextChanged="SettingSearchBox_TextChanged"/>
+       <ComboBox x:Name="SettingFilterCombo" Grid.Column="1" Margin="4" SelectionChanged="SettingFilterCombo_SelectionChanged">
+        <ComboBoxItem Tag="All">全部設定</ComboBoxItem><ComboBoxItem Tag="Changed">只顯示已修改</ComboBoxItem>
+        <ComboBoxItem Tag="Pending">只顯示待套用</ComboBoxItem><ComboBoxItem Tag="Unknown">只顯示未註明</ComboBoxItem>
+        <ComboBoxItem Tag="Invalid">只顯示無效值</ComboBoxItem>
+       </ComboBox>
+       <TextBlock x:Name="SettingsFilterSummaryText" Grid.Column="2" VerticalAlignment="Center" Margin="10,0"
+        Foreground="#AFC0C8" Text="顯示全部"/>
+      </Grid>
+      <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="8"/><ColumnDefinition/></Grid.ColumnDefinitions>
+       <GroupBox Header="找到的設定檔"><ListBox x:Name="ServerListBox" DisplayMemberPath="DisplayName"
        Background="#11171B" Foreground="White" BorderThickness="0" SelectionChanged="ServerListBox_SelectionChanged"/></GroupBox>
       <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="#354650"/>
       <GroupBox Grid.Column="2" Header="目前值與 Build 42 預設">
@@ -173,6 +188,7 @@
          <DataGridTextColumn Header="目前值" Binding="{Binding CurrentValue}" Width="*"/>
          <DataGridTextColumn Header="預設值" Binding="{Binding DefaultValue}" Width="130" IsReadOnly="True"/>
          <DataGridTextColumn Header="允許範圍／選項" Binding="{Binding AllowedRange}" Width="180" IsReadOnly="True"/>
+         <DataGridTextColumn Header="官方註記／說明" Binding="{Binding Notes}" Width="2*" IsReadOnly="True"/>
          <DataGridTextColumn Header="規格來源" Binding="{Binding MetadataSource}" Width="150" IsReadOnly="True"/>
          <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="100" IsReadOnly="True"/>
         </DataGrid.Columns>
@@ -182,9 +198,11 @@
     </Grid>
    </TabItem>
    <TabItem x:Name="FullSettingsTab" Header=" 完整設定 ">
-    <Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <TabControl Background="#182026" BorderBrush="#354650">
-      <TabItem Header="伺服器與權限"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="14">
+     <Grid><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <TabControl x:Name="FullSettingsPages" Background="#182026" BorderBrush="#354650"
+       HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+       ItemContainerStyle="{StaticResource SettingsRailTabItem}" TabStripPlacement="Left">
+       <TabItem x:Name="ServerPermissionsPage" Header="伺服器與權限"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="14">
        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
        <StackPanel>
         <GroupBox Header="遊戲規則"><StackPanel>
@@ -213,8 +231,10 @@
         </Grid></GroupBox>
        </StackPanel>
       </Grid></ScrollViewer></TabItem>
-      <TabItem Header="世界與物資"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="14">
+       <TabItem x:Name="WorldItemsPage" Header="世界與物資"><Grid Margin="14">
+       <Grid.RowDefinitions><RowDefinition Height="*"/></Grid.RowDefinitions>
        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+       <ScrollViewer Grid.Row="0" Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
        <StackPanel>
         <GroupBox Header="時間與生存"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="310"/><ColumnDefinition/></Grid.ColumnDefinitions>
          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
@@ -239,8 +259,9 @@
                      Foreground="#E1A84B" TextWrapping="Wrap" Margin="8"/>
          </StackPanel>
         </GroupBox>
-       </StackPanel>
-       <StackPanel Grid.Column="1">
+       </StackPanel></ScrollViewer>
+       <ScrollViewer Grid.Row="0" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+       <StackPanel>
         <GroupBox Header="物資倍率（預設 0.6；允許 0.00–4.00）"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition/></Grid.ColumnDefinitions>
          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
          <Label Content="食物"/><TextBox x:Name="FoodLootBox" Grid.Column="1"/>
@@ -250,20 +271,46 @@
          <Label Grid.Row="4" Content="其他"/><TextBox x:Name="OtherLootBox" Grid.Row="4" Grid.Column="1"/>
         </Grid></GroupBox>
         <TextBlock x:Name="LootSchemaHint" Text="B42 使用 0.00–4.00 小數倍率；數值越高，物資越多。" Foreground="#AFC0C8" TextWrapping="Wrap" Margin="10"/>
-       </StackPanel>
-      </Grid></ScrollViewer></TabItem>
-      <TabItem Header="玩家與生存"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="14">
+       </StackPanel></ScrollViewer>
+      </Grid></TabItem>
+       <TabItem x:Name="WorldDetailsPage" Header="世界詳細">
+       <Grid Margin="14"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,0,0,8">
+         <DockPanel>
+          <Button DockPanel.Dock="Right" Tag="World" Content="恢復選取列預設" Click="ResetFeaturedDefault_Click"/>
+          <StackPanel><TextBlock Text="世界詳細設定" FontSize="20" FontWeight="SemiBold"/>
+           <TextBlock x:Name="WorldDetailsSummaryText" Text="尚未讀取設定檔" Foreground="#AFC0C8" Margin="0,5,0,0"/>
+          </StackPanel>
+         </DockPanel>
+        </Border>
+        <DataGrid x:Name="WorldDetailsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+         CanUserDeleteRows="False" SelectionUnit="FullRow" Background="#11171B" Foreground="#EAF0F2"
+         RowBackground="#182026" AlternatingRowBackground="#222D34" HeadersVisibility="Column">
+         <DataGrid.Columns>
+          <DataGridTextColumn Header="設定名稱" Binding="{Binding DisplayName}" Width="190" IsReadOnly="True"/>
+          <DataGridTextColumn Header="原始設定鍵" Binding="{Binding Key}" Width="190" IsReadOnly="True"/>
+          <DataGridTextColumn Header="目前值" Binding="{Binding CurrentValue}" Width="115"/>
+          <DataGridTextColumn Header="預設值" Binding="{Binding DefaultValue}" Width="105" IsReadOnly="True"/>
+          <DataGridTextColumn Header="允許範圍／選項" Binding="{Binding LocalizedAllowedRange}" Width="1.5*" IsReadOnly="True"/>
+          <DataGridTextColumn Header="繁中說明" Binding="{Binding LocalizedNotes}" Width="2.5*" IsReadOnly="True"/>
+         </DataGrid.Columns>
+        </DataGrid>
+       </Grid>
+      </TabItem>
+       <TabItem x:Name="PlayerSurvivalPage" Header="玩家與生存"><Grid Margin="14">
+       <Grid.RowDefinitions><RowDefinition Height="*"/></Grid.RowDefinitions>
        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+       <ScrollViewer Grid.Row="0" Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
        <StackPanel>
         <GroupBox Header="生理狀態與恢復"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="310"/><ColumnDefinition/></Grid.ColumnDefinitions>
          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
          <Label Content="飢餓／口渴／疲勞速度（預設：正常）"/>
          <ComboBox x:Name="StatsDecreaseCombo" Grid.Column="1" Margin="4" ToolTip="Sandbox：StatsDecrease">
-          <ComboBoxItem Tag="1">非常快</ComboBoxItem><ComboBoxItem Tag="2">快</ComboBoxItem><ComboBoxItem Tag="3">正常（預設）</ComboBoxItem><ComboBoxItem Tag="4">慢</ComboBoxItem>
+          <ComboBoxItem Tag="1">非常快</ComboBoxItem><ComboBoxItem Tag="2">快</ComboBoxItem><ComboBoxItem Tag="3">正常（預設）</ComboBoxItem><ComboBoxItem Tag="4">慢</ComboBoxItem><ComboBoxItem Tag="5">非常慢</ComboBoxItem>
          </ComboBox>
          <Label Grid.Row="1" Content="耐力恢復速度（預設：正常）"/>
          <ComboBox x:Name="EndRegenCombo" Grid.Row="1" Grid.Column="1" Margin="4" ToolTip="Sandbox：EndRegen">
-          <ComboBoxItem Tag="1">非常快</ComboBoxItem><ComboBoxItem Tag="2">快</ComboBoxItem><ComboBoxItem Tag="3">正常（預設）</ComboBoxItem><ComboBoxItem Tag="4">慢</ComboBoxItem>
+          <ComboBoxItem Tag="1">非常快</ComboBoxItem><ComboBoxItem Tag="2">快</ComboBoxItem><ComboBoxItem Tag="3">正常（預設）</ComboBoxItem><ComboBoxItem Tag="4">慢</ComboBoxItem><ComboBoxItem Tag="5">非常慢</ComboBoxItem>
          </ComboBox>
          <Label Grid.Row="2" Content="受傷嚴重度（預設：正常）"/>
          <ComboBox x:Name="InjurySeverityCombo" Grid.Row="2" Grid.Column="1" Margin="4" ToolTip="Sandbox：InjurySeverity">
@@ -279,10 +326,11 @@
          <CheckBox x:Name="BoneFractureCheck" Content="允許角色因撞擊、跌落或攻擊而骨折（預設開啟）" ToolTip="Sandbox：BoneFracture"/>
          <CheckBox x:Name="PlayerDamageFromCrashCheck" Content="車禍會對車內玩家造成傷害（預設開啟）" ToolTip="Sandbox：PlayerDamageFromCrash"/>
         </StackPanel></GroupBox>
-       </StackPanel>
-       <StackPanel Grid.Column="1">
+       </StackPanel></ScrollViewer>
+       <ScrollViewer Grid.Row="0" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+       <StackPanel>
         <GroupBox Header="戰鬥與危險"><StackPanel>
-         <CheckBox x:Name="MultiHitZombiesCheck" Content="允許部分近戰武器一次擊中多個殭屍（預設關閉）" ToolTip="Sandbox：MultiHitZombies"/>
+         <CheckBox x:Name="MultiHitZombiesCheck" Content="多重攻擊（MultiHitZombies；預設關閉）：近戰可一次擊中多個殭屍" FontWeight="SemiBold" ToolTip="玩家戰鬥設定；Sandbox：MultiHitZombies"/>
          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="310"/><ColumnDefinition/></Grid.ColumnDefinitions>
           <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
           <Label Content="背後受擊被咬風險（預設：高）"/>
@@ -299,10 +347,36 @@
                    Foreground="#AFC0C8" TextWrapping="Wrap" Margin="10"/>
         <TextBlock Text="飢餓速度依遊戲時間推進：若一天設為 30 分鐘，即使選擇「正常」，現實時間體感仍約為預設 1 小時日長的兩倍。想放慢可將一天調成 1–2 小時，並把此項設為「慢」。"
                    Foreground="#E1A84B" TextWrapping="Wrap" Margin="10"/>
-       </StackPanel>
-      </Grid></ScrollViewer></TabItem>
-      <TabItem Header="殭屍"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="14">
+       </StackPanel></ScrollViewer>
+      </Grid></TabItem>
+       <TabItem x:Name="PlayerDetailsPage" Header="玩家詳細">
+       <Grid Margin="14"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,0,0,8">
+         <DockPanel>
+          <Button DockPanel.Dock="Right" Tag="Player" Content="恢復選取列預設" Click="ResetFeaturedDefault_Click"/>
+          <StackPanel><TextBlock Text="玩家詳細設定" FontSize="20" FontWeight="SemiBold"/>
+           <TextBlock x:Name="PlayerDetailsSummaryText" Text="尚未讀取設定檔" Foreground="#AFC0C8" Margin="0,5,0,0"/>
+          </StackPanel>
+         </DockPanel>
+        </Border>
+        <DataGrid x:Name="PlayerDetailsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+         CanUserDeleteRows="False" SelectionUnit="FullRow" Background="#11171B" Foreground="#EAF0F2"
+         RowBackground="#182026" AlternatingRowBackground="#222D34" HeadersVisibility="Column">
+         <DataGrid.Columns>
+          <DataGridTextColumn Header="設定名稱" Binding="{Binding DisplayName}" Width="190" IsReadOnly="True"/>
+          <DataGridTextColumn Header="原始設定鍵" Binding="{Binding Key}" Width="205" IsReadOnly="True"/>
+          <DataGridTextColumn Header="目前值" Binding="{Binding CurrentValue}" Width="115"/>
+          <DataGridTextColumn Header="預設值" Binding="{Binding DefaultValue}" Width="105" IsReadOnly="True"/>
+          <DataGridTextColumn Header="允許範圍／選項" Binding="{Binding LocalizedAllowedRange}" Width="1.5*" IsReadOnly="True"/>
+          <DataGridTextColumn Header="繁中說明" Binding="{Binding LocalizedNotes}" Width="2.5*" IsReadOnly="True"/>
+         </DataGrid.Columns>
+        </DataGrid>
+       </Grid>
+      </TabItem>
+       <TabItem x:Name="ZombiePage" Header="殭屍"><Grid Margin="14">
+       <Grid.RowDefinitions><RowDefinition Height="*"/></Grid.RowDefinitions>
        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+       <ScrollViewer Grid.Row="0" Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
        <StackPanel>
         <GroupBox Header="ZombieLore"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition/></Grid.ColumnDefinitions>
          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
@@ -311,8 +385,9 @@
          <Label Grid.Row="2" Content="耐久"/><ComboBox x:Name="ZombieToughnessCombo" Grid.Row="2" Grid.Column="1" Margin="4"><ComboBoxItem Tag="1">堅韌</ComboBoxItem><ComboBoxItem Tag="2">普通</ComboBoxItem><ComboBoxItem Tag="3">脆弱</ComboBoxItem></ComboBox>
          <Label Grid.Row="3" Content="病毒傳播"/><ComboBox x:Name="TransmissionCombo" Grid.Row="3" Grid.Column="1" Margin="4"><ComboBoxItem Tag="1">血液＋唾液</ComboBoxItem><ComboBoxItem Tag="2">僅唾液</ComboBoxItem><ComboBoxItem Tag="3">所有人已感染</ComboBoxItem></ComboBox>
         </Grid></GroupBox>
-       </StackPanel>
-       <StackPanel Grid.Column="1">
+       </StackPanel></ScrollViewer>
+       <ScrollViewer Grid.Row="0" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+       <StackPanel>
         <GroupBox Header="ZombieConfig"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition/></Grid.ColumnDefinitions>
          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
          <Label Content="人口倍率（預設 1.0；0–4）"/><TextBox x:Name="PopulationBox" Grid.Column="1"/>
@@ -320,10 +395,36 @@
          <Label Grid.Row="2" Content="巔峰日（預設 28；1–365）"/><TextBox x:Name="PeakDayBox" Grid.Row="2" Grid.Column="1"/>
          <Label Grid.Row="3" Content="重生小時（預設 72；0–8760）"/><TextBox x:Name="ZombieRespawnBox" Grid.Row="3" Grid.Column="1"/>
         </Grid></GroupBox>
-       </StackPanel>
-      </Grid></ScrollViewer></TabItem>
-      <TabItem Header="進階伺服器"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="14">
+       </StackPanel></ScrollViewer>
+      </Grid></TabItem>
+       <TabItem x:Name="ZombieDetailsPage" Header="殭屍詳細">
+       <Grid Margin="14"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,0,0,8">
+         <DockPanel>
+          <Button DockPanel.Dock="Right" Tag="Zombie" Content="恢復選取列預設" Click="ResetFeaturedDefault_Click"/>
+          <StackPanel><TextBlock Text="殭屍詳細設定" FontSize="20" FontWeight="SemiBold"/>
+           <TextBlock x:Name="ZombieDetailsSummaryText" Text="尚未讀取設定檔" Foreground="#AFC0C8" Margin="0,5,0,0"/>
+          </StackPanel>
+         </DockPanel>
+        </Border>
+        <DataGrid x:Name="ZombieDetailsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+         CanUserDeleteRows="False" SelectionUnit="FullRow" Background="#11171B" Foreground="#EAF0F2"
+         RowBackground="#182026" AlternatingRowBackground="#222D34" HeadersVisibility="Column">
+         <DataGrid.Columns>
+          <DataGridTextColumn Header="設定名稱" Binding="{Binding DisplayName}" Width="190" IsReadOnly="True"/>
+          <DataGridTextColumn Header="原始設定鍵" Binding="{Binding Key}" Width="215" IsReadOnly="True"/>
+          <DataGridTextColumn Header="目前值" Binding="{Binding CurrentValue}" Width="115"/>
+          <DataGridTextColumn Header="預設值" Binding="{Binding DefaultValue}" Width="105" IsReadOnly="True"/>
+          <DataGridTextColumn Header="允許範圍／選項" Binding="{Binding LocalizedAllowedRange}" Width="1.5*" IsReadOnly="True"/>
+          <DataGridTextColumn Header="繁中說明" Binding="{Binding LocalizedNotes}" Width="2.5*" IsReadOnly="True"/>
+         </DataGrid.Columns>
+        </DataGrid>
+       </Grid>
+      </TabItem>
+       <TabItem x:Name="AdvancedServerPage" Header="進階伺服器"><Grid Margin="14">
+       <Grid.RowDefinitions><RowDefinition Height="*"/></Grid.RowDefinitions>
        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+       <ScrollViewer Grid.Row="0" Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
        <StackPanel>
         <GroupBox Header="帳號與顯示"><StackPanel>
          <CheckBox x:Name="AllowNonAsciiUsernameCheck" Content="允許非 ASCII 使用者名稱"/>
@@ -351,8 +452,9 @@
           <Label Grid.Row="2" Content="安全屋移除小時（預設 144；0=停用）"/><TextBox x:Name="SafehouseRemovalHoursBox" Grid.Row="2" Grid.Column="1"/>
          </Grid>
         </StackPanel></GroupBox>
-       </StackPanel>
-       <StackPanel Grid.Column="1">
+       </StackPanel></ScrollViewer>
+       <ScrollViewer Grid.Row="0" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+       <StackPanel>
         <GroupBox Header="戰鬥與移動"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="315"/><ColumnDefinition/></Grid.ColumnDefinitions>
          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
          <Label Content="PVP 槍傷（預設 50；0–500）"/><TextBox x:Name="PvpFirearmDamageBox" Grid.Column="1"/>
@@ -368,147 +470,252 @@
         </StackPanel></GroupBox>
         <TextBlock Text="欄位依目前 Build 42 ServerOptions 更新；讀取既有 INI 時以檔案目前值為準，未管理的新欄位仍會原樣保留。"
          Foreground="#AFC0C8" TextWrapping="Wrap" Margin="10"/>
-       </StackPanel>
-      </Grid></ScrollViewer></TabItem>
-      <TabItem Header="模組">
-       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-       <Grid Margin="14" MinHeight="1160">
-        <Grid.RowDefinitions>
-         <RowDefinition Height="Auto"/><RowDefinition Height="92"/><RowDefinition Height="Auto"/>
-         <RowDefinition Height="190"/><RowDefinition Height="340"/>
-         <RowDefinition Height="Auto"/><RowDefinition Height="270"/>
-        </Grid.RowDefinitions>
-        <Grid>
-         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-         <StackPanel>
-          <TextBlock Text="Steam Workshop ID（分號分隔）" Foreground="#E1A84B" FontWeight="Bold"/>
-          <TextBlock Text="下載順序不等於載入順序；管理器會選取目前 B42 版本、檢查硬依賴／作者排序／互斥選項，再由下方勾選順序產生 Mods。"
-           Foreground="#AFC0C8" TextWrapping="Wrap" Margin="0,3,12,6"/>
-         </StackPanel>
-         <Border Grid.Column="1" Background="#10231D" BorderBrush="#297052" BorderThickness="1"
-          CornerRadius="5" Padding="10,6" VerticalAlignment="Top">
-          <TextBlock Text="勾選項目＝伺服器啟用清單" Foreground="#72D3A2" FontWeight="Bold"/>
-         </Border>
-        </Grid>
-        <TextBox x:Name="WorkshopBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap"
-         VerticalScrollBarVisibility="Auto"/>
-        <Grid Grid.Row="2" Margin="0,8,0,8">
-         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-         <StackPanel Orientation="Horizontal">
-          <Button x:Name="ResolveModsButton" Content="下載／解析並檢查依賴" Click="ResolveMods_Click" Background="#297052"/>
-          <Button Content="僅重新掃描本機" Click="RefreshLocalMods_Click"/>
-         </StackPanel>
-         <TextBlock Grid.Column="1" x:Name="ResolvedModsText" Text="尚未解析" VerticalAlignment="Center"
-          Foreground="#AFC0C8" Margin="12,0" TextTrimming="CharacterEllipsis"/>
-         <ProgressBar Grid.Column="2" x:Name="ModResolveProgress" Width="130" Height="8"
-          IsIndeterminate="True" Visibility="Collapsed" VerticalAlignment="Center"/>
-        </Grid>
-        <Expander Grid.Row="3" Header="Steam 頁面宣告的依賴候選（不會自動加入）" IsExpanded="True"
-         Foreground="#E1A84B" Margin="0,0,0,8">
-         <Grid>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-          <DataGrid x:Name="WorkshopDependencyGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-           CanUserDeleteRows="False" CanUserSortColumns="False" HeadersVisibility="Column"
-           Background="#10171B" Foreground="White" RowBackground="#142027"
-           AlternatingRowBackground="#19272E" BorderBrush="#3C515B" BorderThickness="1">
-           <DataGrid.Columns>
-            <DataGridCheckBoxColumn Header="加入" Binding="{Binding Include, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
-            <DataGridTextColumn Header="Workshop ID" Binding="{Binding WorkshopId}" Width="115" IsReadOnly="True"/>
-            <DataGridTextColumn Header="名稱" Binding="{Binding Title}" Width="1.4*" IsReadOnly="True"/>
-            <DataGridTextColumn Header="由下列項目宣告" Binding="{Binding RequiredBy}" Width="1.2*" IsReadOnly="True"/>
-            <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="150" IsReadOnly="True"/>
-           </DataGrid.Columns>
-          </DataGrid>
-          <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
-           <TextBlock Text="Steam Required Items 可能包含可選功能；請自行判斷。" Foreground="#AFC0C8"
-            VerticalAlignment="Center" Margin="0,0,10,0"/>
-           <Button Content="加入勾選候選（尚未下載／寫入）" Click="AddSelectedWorkshopDependencies_Click"
-            Background="#8A641F"/>
+       </StackPanel></ScrollViewer>
+      </Grid></TabItem>
+       <TabItem x:Name="AntiCheatPage" Header="反作弊">
+       <Grid Margin="14"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,0,0,8">
+         <DockPanel>
+          <Button DockPanel.Dock="Right" Tag="AntiCheat" Content="恢復選取列預設" Click="ResetFeaturedDefault_Click"/>
+          <StackPanel><TextBlock Text="Build 42 反作弊設定" FontSize="20" FontWeight="SemiBold"/>
+           <TextBlock x:Name="AntiCheatDetailsSummaryText" Text="尚未讀取設定檔" Foreground="#AFC0C8" Margin="0,5,0,0"/>
           </StackPanel>
-         </Grid>
-        </Expander>
-        <DataGrid x:Name="ResolvedModsGrid" Grid.Row="4" AutoGenerateColumns="False" CanUserAddRows="False"
-         CanUserDeleteRows="False" CanUserSortColumns="False" SelectionMode="Single" SelectionUnit="FullRow"
-         HeadersVisibility="Column" GridLinesVisibility="Horizontal" Background="#10171B"
-         BorderBrush="#3C515B" BorderThickness="1" Foreground="White" RowBackground="#142027"
-         AlternatingRowBackground="#19272E" MinHeight="300">
+         </DockPanel>
+        </Border>
+        <DataGrid x:Name="AntiCheatDetailsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+         CanUserDeleteRows="False" SelectionUnit="FullRow" Background="#11171B" Foreground="#EAF0F2"
+         RowBackground="#182026" AlternatingRowBackground="#222D34" HeadersVisibility="Column">
          <DataGrid.Columns>
-          <DataGridCheckBoxColumn Header="啟用" Binding="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
-          <DataGridTextColumn Header="順序" Binding="{Binding Order}" Width="55" IsReadOnly="True"/>
-          <DataGridTextColumn Header="Workshop" Binding="{Binding WorkshopId}" Width="105" IsReadOnly="True"/>
-          <DataGridTextColumn Header="名稱" Binding="{Binding ModName}" Width="1.25*" IsReadOnly="True"/>
-          <DataGridTextColumn Header="Mod ID" Binding="{Binding ModId}" Width="1.2*" IsReadOnly="True"/>
-          <DataGridTextColumn Header="採用版本" Binding="{Binding Variant}" Width="90" IsReadOnly="True"/>
-          <DataGridTextColumn Header="分類" Binding="{Binding Category}" Width="115" IsReadOnly="True"/>
-          <DataGridTextColumn Header="客戶端白名單判定" Binding="{Binding ClientPolicy}" Width="155" IsReadOnly="True"/>
-          <DataGridTextColumn Header="依賴" Binding="{Binding Dependencies}" Width="1.2*" IsReadOnly="True"/>
-          <DataGridTextColumn Header="作者排序規則" Binding="{Binding Ordering}" Width="1.3*" IsReadOnly="True"/>
-          <DataGridTextColumn Header="選擇規則" Binding="{Binding SelectionPolicy}" Width="135" IsReadOnly="True"/>
-          <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="1.2*" IsReadOnly="True"/>
+          <DataGridTextColumn Header="設定名稱" Binding="{Binding DisplayName}" Width="190" IsReadOnly="True"/>
+          <DataGridTextColumn Header="原始設定鍵" Binding="{Binding Key}" Width="215" IsReadOnly="True"/>
+          <DataGridTextColumn Header="目前值" Binding="{Binding CurrentValue}" Width="115"/>
+          <DataGridTextColumn Header="預設值" Binding="{Binding DefaultValue}" Width="105" IsReadOnly="True"/>
+          <DataGridTextColumn Header="允許範圍／選項" Binding="{Binding LocalizedAllowedRange}" Width="1.5*" IsReadOnly="True"/>
+          <DataGridTextColumn Header="繁中說明" Binding="{Binding LocalizedNotes}" Width="2.5*" IsReadOnly="True"/>
          </DataGrid.Columns>
         </DataGrid>
-        <Grid Grid.Row="5" Margin="0,8,0,0">
-         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-         <StackPanel Orientation="Horizontal">
-          <Button Content="上移" Click="MoveModUp_Click"/>
-          <Button Content="下移" Click="MoveModDown_Click"/>
-          <Button Content="自動排序 MOD／地圖" Click="SortModsByDependencies_Click"/>
-         </StackPanel>
-         <StackPanel Grid.Column="2" Orientation="Horizontal">
-          <Button Content="套用勾選與順序（尚未寫入 INI）" Click="ApplySelectedMods_Click" Background="#8A641F"/>
-         </StackPanel>
-        </Grid>
-        <Expander Grid.Row="6" Header="地圖與可選重生區域" IsExpanded="True"
-         Foreground="#E1A84B" Margin="0,8,0,0">
-         <Grid>
-          <Grid.RowDefinitions>
-           <RowDefinition Height="150"/><RowDefinition Height="Auto"/>
-           <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-          </Grid.RowDefinitions>
-          <DataGrid x:Name="MapCandidatesGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-           CanUserDeleteRows="False" CanUserSortColumns="False" HeadersVisibility="Column"
-           SelectionMode="Single" SelectionUnit="FullRow" Background="#10171B" Foreground="White"
-           RowBackground="#142027" AlternatingRowBackground="#19272E" BorderBrush="#3C515B" BorderThickness="1">
-           <DataGrid.Columns>
-            <DataGridCheckBoxColumn Header="加入 Map" Binding="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}" Width="75"/>
-            <DataGridTextColumn Header="順序" Binding="{Binding Order}" Width="55" IsReadOnly="True"/>
-            <DataGridTextColumn Header="地圖資料夾" Binding="{Binding MapFolder}" Width="1.5*" IsReadOnly="True"/>
-            <DataGridTextColumn Header="來源 Mod ID" Binding="{Binding ModId}" Width="1.2*" IsReadOnly="True"/>
-            <DataGridCheckBoxColumn Header="加入重生選單" Binding="{Binding SpawnEnabled, UpdateSourceTrigger=PropertyChanged}" Width="105"/>
-            <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="1.2*" IsReadOnly="True"/>
-           </DataGrid.Columns>
-          </DataGrid>
-          <StackPanel Grid.Row="1" Orientation="Horizontal">
-           <Button Content="上移地圖" Click="MoveMapUp_Click"/>
-           <Button Content="下移地圖" Click="MoveMapDown_Click"/>
-           <Button Content="套用地圖與重生點（尚未寫入）" Click="ApplyMapSelections_Click" Background="#8A641F"/>
-          </StackPanel>
-          <Grid Grid.Row="2">
-           <Grid.ColumnDefinitions><ColumnDefinition Width="165"/><ColumnDefinition/></Grid.ColumnDefinitions>
-           <TextBlock Text="待儲存地圖順序（Map=）" Foreground="#E1A84B" VerticalAlignment="Center"/>
-           <TextBox x:Name="MapFoldersBox" Grid.Column="1"
-            ToolTip="分號分隔；自訂地圖通常需放在 Muldraugh, KY 前面"/>
-          </Grid>
-          <TextBlock Grid.Row="3" Margin="0,6,0,0" Foreground="#AFC0C8" TextWrapping="Wrap"
-           Text="只有找到 spawnpoints.lua 的地圖才能加入角色建立重生選單；勾選後於明確儲存時寫入帶有管理器標記的 _spawnregions.lua 區塊。其他既有內容會保留。客戶端白名單判定僅供審核，DoLuaChecksum 維持 true。"/>
-         </Grid>
-        </Expander>
-        <TextBox x:Name="ModsBox" Visibility="Collapsed"/>
        </Grid>
-       </ScrollViewer>
       </TabItem>
-      <TabItem Header="原始設定檔"><Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
+       <TabItem x:Name="ModsPage" Header="模組">
+        <Grid Margin="2">
+         <TabControl Background="#182026" BorderBrush="#354650"
+          HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+          ItemContainerStyle="{StaticResource DenseSettingsTabItem}">
+          <TabItem Header="Workshop／依賴">
+           <Grid Margin="2">
+            <Grid.RowDefinitions>
+             <RowDefinition Height="Auto"/><RowDefinition Height="96"/>
+             <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Grid>
+             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <StackPanel>
+              <TextBlock Text="新增 Workshop ID（分號分隔）" Foreground="#E1A84B" FontWeight="Bold"/>
+              <TextBlock Text="此欄只用來新增，成功解析後會自動清空。既有項目請到「伺服器模組」啟用、停用或移出。"
+               Foreground="#AFC0C8" TextWrapping="Wrap" Margin="0,3,12,6"/>
+             </StackPanel>
+             <Border Grid.Column="1" Background="#10231D" BorderBrush="#297052" BorderThickness="1"
+              CornerRadius="5" Padding="10,6" VerticalAlignment="Top">
+               <TextBlock Text="目前伺服器清單不會因輸入欄空白而消失" Foreground="#72D3A2" FontWeight="Bold"/>
+             </Border>
+            </Grid>
+            <TextBox x:Name="WorkshopBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap"
+             VerticalScrollBarVisibility="Auto"/>
+            <Grid Grid.Row="2" Margin="0,8">
+             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <StackPanel Orientation="Horizontal">
+               <Button x:Name="ResolveNewModsButton" Content="加入並解析" Click="ResolveNewMods_Click" Background="#8A641F"/>
+               <Button x:Name="ResolveModsButton" Content="重新檢查全部" Click="ResolveMods_Click" Background="#297052"/>
+               <Button Content="重新掃描已加入" Click="RefreshLocalMods_Click"/>
+             </StackPanel>
+             <TextBlock Grid.Column="1" x:Name="ResolvedModsText" Text="尚未解析" VerticalAlignment="Center"
+              Foreground="#AFC0C8" Margin="12,0" TextTrimming="CharacterEllipsis"/>
+             <ProgressBar Grid.Column="2" x:Name="ModResolveProgress" Width="130" Height="8"
+              IsIndeterminate="True" Visibility="Collapsed" VerticalAlignment="Center"/>
+            </Grid>
+            <Expander Grid.Row="3" Header="可選：檢查 Steam 頁面宣告的依賴候選" IsExpanded="False"
+             Foreground="#E1A84B">
+             <Grid Margin="0,6,0,0">
+              <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+              <DataGrid x:Name="WorkshopDependencyGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+               CanUserDeleteRows="False" CanUserSortColumns="False" HeadersVisibility="Column"
+               Background="#10171B" Foreground="White" RowBackground="#142027"
+               AlternatingRowBackground="#19272E" BorderBrush="#3C515B" BorderThickness="1">
+               <DataGrid.Columns>
+                <DataGridCheckBoxColumn Header="加入" Binding="{Binding Include, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                <DataGridTextColumn Header="Workshop ID" Binding="{Binding WorkshopId}" Width="115" IsReadOnly="True"/>
+                <DataGridTextColumn Header="名稱" Binding="{Binding Title}" Width="1.4*" IsReadOnly="True"/>
+                <DataGridTextColumn Header="由下列項目宣告" Binding="{Binding RequiredBy}" Width="1.2*" IsReadOnly="True"/>
+                <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="150" IsReadOnly="True"/>
+               </DataGrid.Columns>
+              </DataGrid>
+              <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+               <TextBlock Text="Required Items 可能包含可選功能；請自行判斷。" Foreground="#AFC0C8"
+                VerticalAlignment="Center" Margin="0,0,10,0"/>
+               <Button Content="加入勾選候選（尚未下載／寫入）" Click="AddSelectedWorkshopDependencies_Click"
+                Background="#8A641F"/>
+              </StackPanel>
+             </Grid>
+            </Expander>
+           </Grid>
+          </TabItem>
+           <TabItem Header="伺服器模組">
+           <Grid Margin="2">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid Margin="0,0,0,8">
+             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="190"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <TextBox x:Name="ModSearchBox" ToolTip="搜尋 Workshop ID、Mod ID、名稱、分類、依賴或地圖"
+              TextChanged="ModSearchBox_TextChanged"/>
+             <ComboBox x:Name="ModFilterCombo" Grid.Column="1" Margin="4" SelectionChanged="ModFilterCombo_SelectionChanged">
+              <ComboBoxItem Tag="All">全部項目</ComboBoxItem><ComboBoxItem Tag="Enabled">已啟用</ComboBoxItem>
+              <ComboBoxItem Tag="Disabled">未啟用</ComboBoxItem><ComboBoxItem Tag="Warnings">需要確認</ComboBoxItem>
+              <ComboBoxItem Tag="Maps">地圖</ComboBoxItem><ComboBoxItem Tag="Dependencies">框架／依賴</ComboBoxItem>
+             </ComboBox>
+             <StackPanel Grid.Column="2" Orientation="Horizontal">
+              <Button Content="勾選目前結果" Click="SelectVisibleMods_Click"/>
+              <Button Content="取消目前結果" Click="ClearVisibleMods_Click"/>
+             </StackPanel>
+            </Grid>
+            <Grid Grid.Row="1">
+             <Grid.ColumnDefinitions><ColumnDefinition Width="2.2*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
+             <DataGrid x:Name="ResolvedModsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+              CanUserDeleteRows="False" CanUserSortColumns="False" SelectionMode="Single" SelectionUnit="FullRow"
+              HeadersVisibility="Column" GridLinesVisibility="Horizontal" Background="#10171B"
+              BorderBrush="#3C515B" BorderThickness="1" Foreground="White" RowBackground="#142027"
+              AlternatingRowBackground="#19272E">
+              <DataGrid.Columns>
+                <DataGridTemplateColumn Header="啟用" Width="55">
+                 <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                  <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                   IsEnabled="{Binding CanEnable}" HorizontalAlignment="Center" Click="ModEnabledCheck_Click"/>
+                 </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="#" Binding="{Binding Order}" Width="42" IsReadOnly="True"/>
+                <DataGridTextColumn Header="模組名稱" Binding="{Binding ModName}" Width="1.5*" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Workshop ID" Binding="{Binding WorkshopId}" Width="110" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Mod ID" Binding="{Binding ModId}" Width="1.2*" IsReadOnly="True"/>
+                <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="1.2*" IsReadOnly="True"/>
+              </DataGrid.Columns>
+             </DataGrid>
+             <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="#2D3E46"/>
+             <GroupBox Grid.Column="2" Header="選取項目詳情" Margin="6,0,0,0">
+              <ScrollViewer VerticalScrollBarVisibility="Auto">
+               <StackPanel Margin="8,4">
+                <TextBlock Text="Workshop ID" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock x:Name="SelectedWorkshopIdText" Text="{Binding SelectedItem.DisplayWorkshopId, ElementName=ResolvedModsGrid, TargetNullValue=—}"
+                 TextWrapping="Wrap" Margin="0,2,0,8"/>
+                <TextBlock Text="Mod ID" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock x:Name="SelectedModIdText" Text="{Binding SelectedItem.DisplayModId, ElementName=ResolvedModsGrid, TargetNullValue=—}"
+                 TextWrapping="Wrap" Margin="0,2,0,8"/>
+                <TextBlock Text="來源" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock x:Name="SelectedSourceKindText" Text="{Binding SelectedItem.SourceKind, ElementName=ResolvedModsGrid}"
+                 TextWrapping="Wrap" Margin="0,2,0,10"/>
+                <TextBlock Text="Workshop 名稱" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock Text="{Binding SelectedItem.WorkshopTitle, ElementName=ResolvedModsGrid}" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                <TextBlock Text="採用版本／分類" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock Text="{Binding SelectedItem.Variant, ElementName=ResolvedModsGrid}" TextWrapping="Wrap" Margin="0,2,0,4"/>
+                <TextBlock Text="{Binding SelectedItem.Category, ElementName=ResolvedModsGrid}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <TextBlock Text="依賴" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock Text="{Binding SelectedItem.Dependencies, ElementName=ResolvedModsGrid}" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                <TextBlock Text="作者排序規則" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock Text="{Binding SelectedItem.Ordering, ElementName=ResolvedModsGrid}" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                <TextBlock Text="選擇規則" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock Text="{Binding SelectedItem.SelectionPolicy, ElementName=ResolvedModsGrid}" TextWrapping="Wrap" Margin="0,2,0,10"/>
+                <TextBlock Text="客戶端判定" Foreground="#E1A84B" FontWeight="Bold"/>
+                <TextBlock Text="{Binding SelectedItem.ClientPolicy, ElementName=ResolvedModsGrid}" TextWrapping="Wrap"/>
+               </StackPanel>
+              </ScrollViewer>
+             </GroupBox>
+            </Grid>
+            <Grid Grid.Row="2" Margin="0,8,0,0">
+             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <StackPanel Orientation="Horizontal">
+               <Button Content="上移" Click="MoveModUp_Click"/>
+               <Button Content="下移" Click="MoveModDown_Click"/>
+               <Button Content="自動排序 MOD／地圖" Click="SortModsByDependencies_Click"/>
+               <Button Content="移出選取來源" Click="RemoveSelectedWorkshop_Click" Background="#7A433A"/>
+              </StackPanel>
+              <TextBlock Grid.Column="1" Text="取消勾選＝停用 Mod ID；移出 Workshop 不會刪除本機檔案"
+               Foreground="#AFC0C8" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+             <Button Grid.Column="2" Content="套用勾選與順序（尚未寫入 INI）"
+              Click="ApplySelectedMods_Click" Background="#8A641F"/>
+            </Grid>
+           </Grid>
+          </TabItem>
+          <TabItem Header="地圖／重生點">
+           <Grid Margin="2">
+            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <DataGrid x:Name="MapCandidatesGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+             CanUserDeleteRows="False" CanUserSortColumns="False" HeadersVisibility="Column"
+             SelectionMode="Single" SelectionUnit="FullRow" Background="#10171B" Foreground="White"
+             RowBackground="#142027" AlternatingRowBackground="#19272E" BorderBrush="#3C515B" BorderThickness="1">
+             <DataGrid.Columns>
+              <DataGridCheckBoxColumn Header="加入 Map" Binding="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}" Width="75"/>
+              <DataGridTextColumn Header="順序" Binding="{Binding Order}" Width="55" IsReadOnly="True"/>
+              <DataGridTextColumn Header="地圖資料夾" Binding="{Binding MapFolder}" Width="1.5*" IsReadOnly="True"/>
+              <DataGridTextColumn Header="來源 Mod ID" Binding="{Binding ModId}" Width="1.2*" IsReadOnly="True"/>
+              <DataGridCheckBoxColumn Header="加入重生選單" Binding="{Binding SpawnEnabled, UpdateSourceTrigger=PropertyChanged}" Width="105"/>
+              <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="1.2*" IsReadOnly="True"/>
+             </DataGrid.Columns>
+            </DataGrid>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,4">
+             <Button Content="上移地圖" Click="MoveMapUp_Click"/>
+             <Button Content="下移地圖" Click="MoveMapDown_Click"/>
+             <Button Content="套用地圖與重生點（尚未寫入）" Click="ApplyMapSelections_Click" Background="#8A641F"/>
+            </StackPanel>
+            <Grid Grid.Row="2">
+             <Grid.ColumnDefinitions><ColumnDefinition Width="205"/><ColumnDefinition/></Grid.ColumnDefinitions>
+             <TextBlock Text="待儲存地圖順序（Map=）" Foreground="#E1A84B" VerticalAlignment="Center"/>
+             <TextBox x:Name="MapFoldersBox" Grid.Column="1"
+              ToolTip="分號分隔；自訂地圖通常需放在 Muldraugh, KY 前面"/>
+            </Grid>
+            <TextBlock Grid.Row="3" Margin="0,6,0,0" Foreground="#AFC0C8" TextWrapping="Wrap"
+             Text="只有找到 spawnpoints.lua 的地圖才能加入角色建立重生選單；勾選後於明確儲存時寫入帶有管理器標記的 _spawnregions.lua 區塊。其他既有內容會保留。客戶端白名單判定僅供審核，DoLuaChecksum 維持 true。"/>
+           </Grid>
+          </TabItem>
+         </TabControl>
+         <TextBox x:Name="ModsBox" Visibility="Collapsed"/>
+        </Grid>
+       </TabItem>
+       <TabItem x:Name="ModSettingsPage" Header="模組設定">
+       <Grid Margin="14"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Background="#121B20" BorderBrush="#354650" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,0,0,8">
+         <DockPanel>
+          <Button DockPanel.Dock="Right" Tag="Mod" Content="恢復選取列預設" Click="ResetFeaturedDefault_Click"/>
+          <StackPanel><TextBlock Text="模組與其他 Sandbox 設定" FontSize="20" FontWeight="SemiBold"/>
+           <TextBlock x:Name="ModSandboxDetailsSummaryText" Text="尚未讀取設定檔" Foreground="#AFC0C8" Margin="0,5,0,0"/>
+           <TextBlock Text="第三方模組欄位由模組作者定義；管理器只翻譯可辨識的內容，不會猜測未知設定。" Foreground="#E1A84B" Margin="0,4,0,0"/>
+          </StackPanel>
+         </DockPanel>
+        </Border>
+        <DataGrid x:Name="ModSandboxDetailsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+         CanUserDeleteRows="False" SelectionUnit="FullRow" Background="#11171B" Foreground="#EAF0F2"
+         RowBackground="#182026" AlternatingRowBackground="#222D34" HeadersVisibility="Column">
+         <DataGrid.Columns>
+          <DataGridTextColumn Header="區段" Binding="{Binding Category}" Width="135" IsReadOnly="True"/>
+          <DataGridTextColumn Header="設定名稱" Binding="{Binding DisplayName}" Width="180" IsReadOnly="True"/>
+          <DataGridTextColumn Header="原始設定鍵" Binding="{Binding Key}" Width="205" IsReadOnly="True"/>
+          <DataGridTextColumn Header="目前值" Binding="{Binding CurrentValue}" Width="115"/>
+          <DataGridTextColumn Header="預設值" Binding="{Binding DefaultValue}" Width="105" IsReadOnly="True"/>
+          <DataGridTextColumn Header="允許範圍／選項" Binding="{Binding LocalizedAllowedRange}" Width="1.4*" IsReadOnly="True"/>
+          <DataGridTextColumn Header="繁中說明" Binding="{Binding LocalizedNotes}" Width="2.2*" IsReadOnly="True"/>
+         </DataGrid.Columns>
+        </DataGrid>
+       </Grid>
+      </TabItem>
+       <TabItem x:Name="RawSettingsPage" Header="原始設定檔"><Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
        <StackPanel Orientation="Horizontal"><Button Content="載入目前檔案" Click="LoadRaw_Click"/><TextBlock Text="支援未來 42.x 新增欄位；請在伺服器停止時編輯。" VerticalAlignment="Center" Foreground="#AFC0C8"/></StackPanel>
        <TextBox x:Name="RawIniBox" Grid.Row="1" FontFamily="Consolas" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
        <TextBlock Grid.Row="2" Text="SandboxVars.lua" Foreground="#E1A84B" Margin="5"/>
        <TextBox x:Name="RawSandboxBox" Grid.Row="3" FontFamily="Consolas" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
       </Grid></TabItem>
      </TabControl>
-     <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
-      <Button Content="從目前檔案讀取 GUI" Click="ReadConfig_Click"/>
-      <Button Content="儲存全部設定" Background="#8A641F" Click="SaveFullConfig_Click"/>
-      <Button Content="儲存原始編輯器內容" Click="SaveRaw_Click"/>
-     </StackPanel>
+      <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+       <Button Content="從目前檔案讀取 GUI" Padding="10,4" Margin="2" Click="ReadConfig_Click"/>
+       <Button Content="儲存全部設定" Padding="10,4" Margin="2" Background="#8A641F" Click="SaveFullConfig_Click"/>
+       <Button Content="儲存原始編輯器內容" Padding="10,4" Margin="2" Click="SaveRaw_Click"/>
+      </StackPanel>
    </Grid>
    </TabItem>
    <TabItem Header=" 自動化 ">
@@ -516,6 +723,7 @@
      <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
       <Grid Margin="6">
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
        <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/>
        </Grid.ColumnDefinitions>
@@ -533,6 +741,8 @@
            ToolTip="伺服器啟動後會反灰；允許 1–1440 分鐘"/>
          </Grid>
          <CheckBox x:Name="BackupCheck" Content="重啟前建立 ZIP 備份"/>
+         <CheckBox x:Name="ShowRestartInWelcomeCheck" Content="在歡迎訊息附加下次定時重啟時間" Margin="5,8,5,0"
+          ToolTip="只顯示伺服器的定時重啟；Workshop 更新觸發的重啟不列入。"/>
          <TextBlock Text="倒數公告（{minutes} 會代入剩餘分鐘）" Foreground="#E1A84B" Margin="5,12,5,0"/>
          <TextBox x:Name="RestartMessageBox" TextWrapping="Wrap" Height="64" AcceptsReturn="True"/>
          <TextBlock Text="流程：遊戲內倒數公告 → save → ZIP 備份 → quit → 等候程序結束 → 再次啟動。排程從伺服器成功啟動時計算。"
@@ -565,7 +775,23 @@
          <TextBox x:Name="WorkshopUpdateMessageBox" TextWrapping="Wrap" Height="64" AcceptsReturn="True"/>
          <TextBlock x:Name="WorkshopUpdateStatusText" Text="模組更新：伺服器未啟動"
           FontSize="15" Foreground="#E1A84B" TextWrapping="Wrap" Margin="5,14"/>
-        </StackPanel>
+       </StackPanel>
+       </Border>
+       <Border Grid.Row="1" Grid.ColumnSpan="3" Margin="0,18,0,0" Background="#121B20"
+        BorderBrush="#354650" BorderThickness="1" CornerRadius="8" Padding="18">
+        <Grid>
+         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+         <StackPanel>
+          <TextBlock Text="排程總覽" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,8"/>
+          <TextBlock x:Name="ScheduleRestartOverviewText" Text="定時重啟：未排程" Foreground="#E1A84B" Margin="0,3"/>
+          <TextBlock x:Name="SchedulePlayerOverviewText" Text="玩家查詢：伺服器未啟動" Foreground="#AFC0C8" Margin="0,3"/>
+         </StackPanel>
+         <StackPanel Grid.Column="1">
+          <TextBlock Text="執行狀態" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,8"/>
+          <TextBlock x:Name="ScheduleWorkshopOverviewText" Text="Workshop 檢查：未排程" Foreground="#E1A84B" Margin="0,3"/>
+          <TextBlock x:Name="ScheduleLastResultText" Text="最近結果：尚無紀錄" Foreground="#AFC0C8" Margin="0,3" TextWrapping="Wrap"/>
+         </StackPanel>
+        </Grid>
        </Border>
       </Grid>
      </ScrollViewer>
@@ -576,6 +802,44 @@
        <Button Content="測試安全重啟" Background="#8A641F" Click="RestartNow_Click"/>
       </StackPanel>
      </Border>
+   </Grid>
+   </TabItem>
+    <TabItem x:Name="DiagnosticsTab" Header=" 診斷與記錄 ">
+    <Grid Margin="18">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <WrapPanel Margin="0,0,0,12">
+      <Button Content="執行環境檢查" Click="RunEnvironmentCheck_Click"/>
+      <Button Content="開啟管理器記錄資料夾" Click="OpenManagerLogs_Click"/>
+      <Button Content="重新載入記錄" Click="ReloadManagerLog_Click"/>
+      <Button x:Name="ConsoleScrollButton" Content="暫停控制台自動捲動" Click="ToggleConsoleScroll_Click"/>
+      <Button Content="匯出隱私清理診斷包" Background="#8A641F" Click="ExportDiagnostics_Click"/>
+      <Label Content="記錄保留天數" VerticalAlignment="Center"/>
+      <TextBox x:Name="LogRetentionDaysBox" Width="72" Text="14"/>
+      <Button Content="儲存記錄設定" Click="SaveLogSettings_Click"/>
+      <TextBlock x:Name="ManagerLogPathText" Margin="12,0" VerticalAlignment="Center" Foreground="#AFC0C8" TextTrimming="CharacterEllipsis"/>
+     </WrapPanel>
+     <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
+      <GroupBox Header="目前環境摘要">
+       <DataGrid x:Name="EnvironmentCheckGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+        <DataGrid.Columns>
+         <DataGridTextColumn Header="項目" Binding="{Binding Item}" Width="1.2*"/>
+         <DataGridTextColumn Header="結果" Binding="{Binding Result}" Width="2*"/>
+         <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="*"/>
+        </DataGrid.Columns>
+       </DataGrid>
+      </GroupBox>
+      <GroupBox Grid.Column="2" Header="GUI 管理器記錄">
+       <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
+        <TextBox x:Name="ManagerLogSearchBox" Margin="5" ToolTip="搜尋目前載入的管理器記錄" TextChanged="ManagerLogSearchBox_TextChanged"/>
+        <TextBox x:Name="ManagerLogViewer" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas"
+         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+       </Grid>
+      </GroupBox>
+     </Grid>
+     <TextBlock x:Name="DiagnosticsStatusText" Grid.Row="2" Margin="5,10,5,0" Foreground="#AFC0C8" TextWrapping="Wrap"
+      Text="診斷包會移除密碼、Steam64 ID、IP、MAC、使用者路徑與 MOD 訂閱清單；匯出前仍會顯示內容摘要。"/>
     </Grid>
    </TabItem>
   </TabControl>
@@ -651,6 +915,11 @@
     </ScrollViewer>
    </Border>
   </Grid>
-  <Border Grid.Row="2" Background="#182026"><TextBlock x:Name="FooterText" Text="Build 42 Stable • App ID 380870" Margin="18,7" Foreground="#82949D"/></Border>
+  <Border Grid.Row="2" Background="#182026">
+   <Grid>
+    <TextBlock x:Name="FooterText" Text="Build 42 Stable • App ID 380870" Margin="18,7" Foreground="#82949D"/>
+    <TextBlock x:Name="UnsavedChangesText" HorizontalAlignment="Right" Margin="18,7" Foreground="#E1A84B" Text="已儲存"/>
+   </Grid>
+  </Border>
  </Grid>
 </Window>
