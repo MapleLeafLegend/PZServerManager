@@ -2,6 +2,11 @@
 
 目前版本：**v2.0.0**
 
+開發與協作：
+
+- 專案創建與維護：**MapleLeaf**
+- AI 開發協作：**[OpenAI Codex](https://github.com/codex)**
+
 授權：**PolyForm Noncommercial License 1.0.0**（僅限非商業用途；此為
 source-available 授權，不是 OSI 開放原始碼授權）。完整條款請見
 [`LICENSE`](LICENSE)，風險與第三方權利說明請見 [`DISCLAIMER.md`](DISCLAIMER.md)。
